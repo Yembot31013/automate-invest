@@ -201,10 +201,15 @@ export function buildAlertEmbed(payload: AlertPayload): DiscordEmbed {
 
 export function buildWebhookPayload(
   payload: AlertPayload,
+  reactionLine?: string | null,
 ): DiscordWebhookPayload {
+  const embed = buildAlertEmbed(payload);
+  if (reactionLine?.trim()) {
+    embed.description = `*${reactionLine.trim()}*\n\n${embed.description ?? ""}`;
+  }
   return {
-    username: "Market Alert Bot",
-    embeds: [buildAlertEmbed(payload)],
+    username: "Signal Desk",
+    embeds: [embed],
   };
 }
 
@@ -233,13 +238,14 @@ export function createBreakoutAlert(snapshot: MarketSnapshot): AlertPayload {
 /** POST a rich embed to the configured Discord webhook. */
 export async function sendDiscordAlert(
   payload: AlertPayload,
+  reactionLine?: string | null,
 ): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim();
   if (!webhookUrl) {
     throw new Error("Missing DISCORD_WEBHOOK_URL");
   }
 
-  const body = buildWebhookPayload(payload);
+  const body = buildWebhookPayload(payload, reactionLine);
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

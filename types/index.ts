@@ -26,6 +26,15 @@ export interface NewsSentiment {
   bearishPercent: number;
 }
 
+/** Recent company headline from Finnhub company-news. */
+export interface CompanyNewsItem {
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  datetime: number;
+}
+
 /** Derived metrics used by anomaly rules and Discord embeds. */
 export interface MarketSnapshot {
   symbol: string;
@@ -43,6 +52,7 @@ export interface MarketSnapshot {
   sentimentScore: number | null;
   closes: number[];
   volumes: number[];
+  headlines: CompanyNewsItem[];
 }
 
 /** Payload handed to the Discord embed builder after a rule fires. */
@@ -58,6 +68,67 @@ export interface WatchlistEntry {
   symbol: string;
   exchange: string;
   addedAt: string;
+}
+
+/** Paper trading position stored per user. */
+export interface PaperPosition {
+  id: string;
+  symbol: string;
+  exchange: string;
+  side: "long";
+  quantity: number;
+  entryPrice: number;
+  entryAt: string;
+  status: "open" | "closed";
+  exitPrice?: number;
+  exitAt?: string;
+  notes?: string;
+}
+
+/** Mark-to-market view of an open (or closed) paper position. */
+export interface PaperPositionMark extends PaperPosition {
+  markPrice: number;
+  marketValue: number;
+  costBasis: number;
+  unrealizedPnl: number;
+  unrealizedPnlPct: number;
+}
+
+/** Portfolio summary for the desk PnL strip. */
+export interface PortfolioSummary {
+  positions: PaperPositionMark[];
+  openCount: number;
+  cash: number;
+  totalCost: number;
+  totalMarketValue: number;
+  equity: number;
+  totalUnrealizedPnl: number;
+  totalUnrealizedPnlPct: number;
+}
+
+/** Counterfactual “what if we bought…” result. */
+export interface WhatIfResult {
+  symbol: string;
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  costBasis: number;
+  marketValue: number;
+  pnl: number;
+  pnlPct: number;
+  barsUsed: number;
+}
+
+/** Ranked recommendation from scan rules. */
+export interface Recommendation {
+  symbol: string;
+  exchange: string;
+  type: AlertType | "watch";
+  score: number;
+  reason: string;
+  snapshot: MarketSnapshot;
 }
 
 /** Discord embed field (API shape). */

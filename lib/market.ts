@@ -1,9 +1,12 @@
 import type {
   CandleSeries,
+  CompanyNewsItem,
   MarketSnapshot,
   NewsSentiment,
   OhlcBar,
 } from "@/types";
+import { acquireFinnhubSlot, cacheGet, cacheSet } from "@/lib/cache";
+import { logger } from "@/lib/logger";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const ALPACA_DATA_BASE = "https://data.alpaca.markets/v2";
@@ -13,6 +16,9 @@ const SMA_PERIOD = 14;
 const VOLUME_AVG_PERIOD = 20;
 const DIP_THRESHOLD_PCT = 8;
 const VOLUME_SURGE_RATIO = 2;
+const OHLC_CACHE_TTL = 300;
+const SENTIMENT_CACHE_TTL = 600;
+const NEWS_CACHE_TTL = 300;
 
 class MarketDataError extends Error {
   constructor(message: string) {
@@ -33,10 +39,10 @@ function unixSeconds(date: Date): number {
   return Math.floor(date.getTime() / 1000);
 }
 
-/**
- * Pure TypeScript simple moving average over the trailing `period` values.
- * No native / binary TA libraries — serverless-safe array reduction only.
- */
+function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
 export function calculateSMA(values: number[], period: number): number {
   if (!Array.isArray(values) || values.length === 0) {
     throw new MarketDataError("Cannot calculate SMA: price series is empty");
@@ -53,7 +59,9 @@ export function calculateSMA(values: number[], period: number): number {
   const window = values.slice(-period);
   const sum = window.reduce((acc, value) => {
     if (!Number.isFinite(value)) {
-      throw new MarketDataError("Cannot calculate SMA: non-finite value in series");
+      throw new MarketDataError(
+        "Cannot calculate SMA: non-finite value in series",
+      );
     }
     return acc + value;
   }, 0);
@@ -61,7 +69,6 @@ export function calculateSMA(values: number[], period: number): number {
   return sum / period;
 }
 
-/** Trailing average of volume (same pure-array approach as SMA). */
 export function calculateAverageVolume(
   volumes: number[],
   period = VOLUME_AVG_PERIOD,
@@ -112,11 +119,17 @@ function mapFinnhubCandles(
   return { symbol, bars };
 }
 
-/** Daily OHLC via Finnhub stock candles. */
 export async function fetchFinnhubDailyCandles(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
 ): Promise<CandleSeries> {
+  const cacheKey = `cache:ohlc:${symbol.toUpperCase()}:${lookbackDays}`;
+  const cached = await cacheGet<CandleSeries>(cacheKey);
+  if (cached?.bars?.length) {
+    return cached;
+  }
+
+  await acquireFinnhubSlot();
   const token = requireEnv("FINNHUB_API_KEY");
   const to = new Date();
   const from = new Date();
@@ -142,7 +155,9 @@ export async function fetchFinnhubDailyCandles(
   }
 
   const payload = (await response.json()) as FinnhubCandleResponse;
-  return mapFinnhubCandles(symbol.toUpperCase(), payload);
+  const series = mapFinnhubCandles(symbol.toUpperCase(), payload);
+  await cacheSet(cacheKey, series, OHLC_CACHE_TTL);
+  return series;
 }
 
 interface AlpacaBarsResponse {
@@ -156,7 +171,6 @@ interface AlpacaBarsResponse {
   }>;
 }
 
-/** Daily OHLC via Alpaca Market Data API (fallback / alternate provider). */
 export async function fetchAlpacaDailyBars(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
@@ -210,10 +224,6 @@ export async function fetchAlpacaDailyBars(
   return { symbol: symbol.toUpperCase(), bars };
 }
 
-/**
- * Prefer Finnhub when FINNHUB_API_KEY is set; otherwise Alpaca.
- * Throws if neither provider can be configured / returns data.
- */
 export async function fetchDailyOhlc(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
@@ -221,7 +231,10 @@ export async function fetchDailyOhlc(
   if (process.env.FINNHUB_API_KEY?.trim()) {
     return fetchFinnhubDailyCandles(symbol, lookbackDays);
   }
-  if (process.env.ALPACA_API_KEY?.trim() && process.env.ALPACA_API_SECRET?.trim()) {
+  if (
+    process.env.ALPACA_API_KEY?.trim() &&
+    process.env.ALPACA_API_SECRET?.trim()
+  ) {
     return fetchAlpacaDailyBars(symbol, lookbackDays);
   }
   throw new MarketDataError(
@@ -238,7 +251,6 @@ interface FinnhubSentimentResponse {
   };
 }
 
-/** Company news sentiment from Finnhub (optional — returns null if unavailable). */
 export async function fetchNewsSentiment(
   symbol: string,
 ): Promise<NewsSentiment | null> {
@@ -247,11 +259,18 @@ export async function fetchNewsSentiment(
     return null;
   }
 
-  const url = new URL(`${FINNHUB_BASE}/news-sentiment`);
-  url.searchParams.set("symbol", symbol.toUpperCase());
-  url.searchParams.set("token", token);
+  const cacheKey = `cache:sentiment:${symbol.toUpperCase()}`;
+  const cached = await cacheGet<NewsSentiment>(cacheKey);
+  if (cached) {
+    return cached;
+  }
 
   try {
+    await acquireFinnhubSlot();
+    const url = new URL(`${FINNHUB_BASE}/news-sentiment`);
+    url.searchParams.set("symbol", symbol.toUpperCase());
+    url.searchParams.set("token", token);
+
     const response = await fetch(url.toString(), {
       method: "GET",
       headers: { Accept: "application/json" },
@@ -259,9 +278,10 @@ export async function fetchNewsSentiment(
     });
 
     if (!response.ok) {
-      console.error(
-        `[market] sentiment fetch failed for ${symbol}: ${response.status}`,
-      );
+      logger.warn("market", "sentiment fetch failed", {
+        symbol,
+        status: response.status,
+      });
       return null;
     }
 
@@ -270,23 +290,106 @@ export async function fetchNewsSentiment(
       return null;
     }
 
-    return {
+    const result: NewsSentiment = {
       symbol: symbol.toUpperCase(),
       companyNewsScore: payload.companyNewsScore,
       bullishPercent: payload.sentiment?.bullishPercent ?? 0,
       bearishPercent: payload.sentiment?.bearishPercent ?? 0,
     };
+    await cacheSet(cacheKey, result, SENTIMENT_CACHE_TTL);
+    return result;
   } catch (error) {
-    console.error(`[market] sentiment error for ${symbol}:`, error);
+    logger.error("market", "sentiment error", {
+      symbol,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
 
-/** Build a snapshot with SMA / volume ratios used by anomaly detectors. */
+interface FinnhubCompanyNewsItem {
+  headline?: string;
+  summary?: string;
+  source?: string;
+  url?: string;
+  datetime?: number;
+}
+
+/** Recent company headlines from Finnhub (last N days). */
+export async function fetchCompanyNews(
+  symbol: string,
+  lookbackDays = 3,
+  limit = 3,
+): Promise<CompanyNewsItem[]> {
+  const token = process.env.FINNHUB_API_KEY?.trim();
+  if (!token) {
+    return [];
+  }
+
+  const cacheKey = `cache:news:${symbol.toUpperCase()}:${lookbackDays}`;
+  const cached = await cacheGet<CompanyNewsItem[]>(cacheKey);
+  if (cached) {
+    return cached.slice(0, limit);
+  }
+
+  try {
+    await acquireFinnhubSlot();
+    const to = new Date();
+    const from = new Date();
+    from.setUTCDate(from.getUTCDate() - lookbackDays);
+
+    const url = new URL(`${FINNHUB_BASE}/company-news`);
+    url.searchParams.set("symbol", symbol.toUpperCase());
+    url.searchParams.set("from", isoDay(from));
+    url.searchParams.set("to", isoDay(to));
+    url.searchParams.set("token", token);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      logger.warn("market", "company news failed", {
+        symbol,
+        status: response.status,
+      });
+      return [];
+    }
+
+    const payload = (await response.json()) as FinnhubCompanyNewsItem[];
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+
+    const items: CompanyNewsItem[] = payload
+      .filter((item) => item.headline)
+      .slice(0, 10)
+      .map((item) => ({
+        headline: item.headline ?? "",
+        summary: item.summary ?? "",
+        source: item.source ?? "",
+        url: item.url ?? "",
+        datetime: item.datetime ?? 0,
+      }));
+
+    await cacheSet(cacheKey, items, NEWS_CACHE_TTL);
+    return items.slice(0, limit);
+  } catch (error) {
+    logger.error("market", "company news error", {
+      symbol,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export function buildMarketSnapshot(
   series: CandleSeries,
   exchange: string,
   sentiment: NewsSentiment | null,
+  headlines: CompanyNewsItem[] = [],
 ): MarketSnapshot {
   const { bars, symbol } = series;
   if (bars.length === 0) {
@@ -320,18 +423,14 @@ export function buildMarketSnapshot(
     sentimentScore: sentiment?.companyNewsScore ?? null,
     closes,
     volumes,
+    headlines,
   };
 }
 
-/** Sharp dip: price ≥ 8% below the 14-day SMA. */
 export function isSharpDip(snapshot: MarketSnapshot): boolean {
   return snapshot.pctBelowSma14 >= DIP_THRESHOLD_PCT;
 }
 
-/**
- * Under-the-radar breakout: volume ≥ 2× 20-day average and non-negative
- * news sentiment when sentiment data is available.
- */
 export function isPromisingBreakout(snapshot: MarketSnapshot): boolean {
   const volumeSurge = snapshot.volumeRatio >= VOLUME_SURGE_RATIO;
   if (!volumeSurge) {
@@ -339,7 +438,6 @@ export function isPromisingBreakout(snapshot: MarketSnapshot): boolean {
   }
 
   if (snapshot.sentimentScore === null) {
-    // Without sentiment, still surface strong structural volume surges.
     return snapshot.changePct > 0;
   }
 

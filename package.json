@@ -1,18 +1,25 @@
 {
-  "name": "nextjs",
+  "name": "signal-desk",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS='--max-http-header-size=131072' next dev --hostname 0.0.0.0 --port 3000",
+    "dev:fix-hosts": "bash scripts/fix-local-hosts.sh",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "NODE_OPTIONS='--max-http-header-size=131072' next start --hostname 0.0.0.0 --port 3000",
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test lib/__tests__/*.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.57",
+    "@ai-sdk/react": "^4.0.87",
+    "@clerk/nextjs": "^7.8.3",
     "@upstash/redis": "^1.38.3",
+    "ai": "^7.0.84",
     "next": "16.2.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

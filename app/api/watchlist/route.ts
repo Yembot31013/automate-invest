@@ -1,9 +1,10 @@
+import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import {
-  addToWatchlist,
-  getWatchlist,
-  removeFromWatchlist,
+  addToUserWatchlist,
+  getUserWatchlist,
+  removeFromUserWatchlist,
 } from "@/lib/redis";
 import type { WatchlistMutationBody } from "@/types";
 
@@ -32,10 +33,14 @@ function parseBody(raw: unknown): WatchlistMutationBody {
   return { symbol, exchange, action };
 }
 
-/** List tracked assets. */
 export async function GET() {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const watchlist = await getWatchlist();
+    const watchlist = await getUserWatchlist(userId);
     return NextResponse.json({ watchlist });
   } catch (error) {
     const message =
@@ -45,14 +50,19 @@ export async function GET() {
   }
 }
 
-/**
- * Add a ticker.
- * Body: `{ "symbol": "NVDA", "exchange": "NASDAQ" }`
- */
 export async function POST(request: Request) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = parseBody(await request.json());
-    const watchlist = await addToWatchlist(body.symbol, body.exchange ?? "NASDAQ");
+    const watchlist = await addToUserWatchlist(
+      userId,
+      body.symbol,
+      body.exchange ?? "NASDAQ",
+    );
     return NextResponse.json({ ok: true, watchlist }, { status: 201 });
   } catch (error) {
     const message =
@@ -63,12 +73,12 @@ export async function POST(request: Request) {
   }
 }
 
-/**
- * Remove a ticker.
- * Body: `{ "symbol": "NVDA" }` or `{ "symbol": "NVDA", "action": "remove" }`
- * Also accepts `?symbol=NVDA`.
- */
 export async function DELETE(request: Request) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const querySymbol = searchParams.get("symbol");
@@ -86,7 +96,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const watchlist = await removeFromWatchlist(symbol);
+    const watchlist = await removeFromUserWatchlist(userId, symbol);
     return NextResponse.json({ ok: true, watchlist });
   } catch (error) {
     const message =
