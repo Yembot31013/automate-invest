@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { MarketDataError, verifyTradableSymbol } from "@/lib/market";
 import {
   addToUserWatchlist,
   getUserWatchlist,
@@ -10,6 +11,7 @@ import type { WatchlistMutationBody } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 function parseBody(raw: unknown): WatchlistMutationBody {
   if (!raw || typeof raw !== "object") {
@@ -58,9 +60,10 @@ export async function POST(request: Request) {
 
   try {
     const body = parseBody(await request.json());
+    const symbol = await verifyTradableSymbol(body.symbol);
     const watchlist = await addToUserWatchlist(
       userId,
-      body.symbol,
+      symbol,
       body.exchange ?? "NASDAQ",
     );
     return NextResponse.json({ ok: true, watchlist }, { status: 201 });
@@ -68,7 +71,13 @@ export async function POST(request: Request) {
     const message =
       error instanceof Error ? error.message : "Failed to add symbol";
     console.error("[watchlist] POST:", message);
-    const status = message.includes("required") ? 400 : 500;
+    const status =
+      error instanceof MarketDataError ||
+      message.includes("required") ||
+      message.includes("No live quote") ||
+      message.includes("Could not verify")
+        ? 400
+        : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

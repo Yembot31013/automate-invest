@@ -8,7 +8,7 @@ type SparklineProps = {
 
 export function Sparkline({
   values,
-  stroke = "#4E9F3D",
+  stroke = "#8bd450",
   className,
 }: SparklineProps) {
   if (!values.length) {

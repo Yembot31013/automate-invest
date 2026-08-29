@@ -224,22 +224,84 @@ export async function fetchAlpacaDailyBars(
   return { symbol: symbol.toUpperCase(), bars };
 }
 
+function hasAlpacaCredentials(): boolean {
+  return Boolean(
+    process.env.ALPACA_API_KEY?.trim() &&
+      process.env.ALPACA_API_SECRET?.trim(),
+  );
+}
+
+/**
+ * Daily OHLC for desk math (SMA, volume ratio, dip %).
+ * Prefer Alpaca when configured — Finnhub free tier often 403s `/stock/candle`.
+ * Finnhub is still used for company headlines (separate path).
+ */
 export async function fetchDailyOhlc(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
 ): Promise<CandleSeries> {
-  if (process.env.FINNHUB_API_KEY?.trim()) {
+  const hasFinnhub = Boolean(process.env.FINNHUB_API_KEY?.trim());
+  const hasAlpaca = hasAlpacaCredentials();
+
+  if (hasAlpaca) {
+    try {
+      return await fetchAlpacaDailyBars(symbol, lookbackDays);
+    } catch (error) {
+      if (!hasFinnhub) throw error;
+      logger.warn("market", "Alpaca OHLC failed; trying Finnhub candles", {
+        symbol,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (hasFinnhub) {
     return fetchFinnhubDailyCandles(symbol, lookbackDays);
   }
-  if (
-    process.env.ALPACA_API_KEY?.trim() &&
-    process.env.ALPACA_API_SECRET?.trim()
-  ) {
-    return fetchAlpacaDailyBars(symbol, lookbackDays);
-  }
+
   throw new MarketDataError(
-    "No market data credentials configured (FINNHUB_API_KEY or ALPACA_API_KEY/SECRET)",
+    "No market data credentials configured (ALPACA_API_KEY/SECRET or FINNHUB_API_KEY)",
   );
+}
+
+/**
+ * Confirm a ticker resolves with the same OHLC path the desk uses.
+ * Throws MarketDataError — caller must not persist the symbol.
+ */
+export async function verifyTradableSymbol(symbol: string): Promise<string> {
+  const normalized = symbol.trim().toUpperCase();
+  if (!normalized) {
+    throw new MarketDataError("Symbol is required");
+  }
+
+  try {
+    const series = await fetchDailyOhlc(normalized, 15);
+    if (!series.bars.length) {
+      throw new MarketDataError(
+        `No market history for ${normalized} — check the ticker and try again`,
+      );
+    }
+    return normalized;
+  } catch (error) {
+    if (error instanceof MarketDataError) {
+      const msg = error.message;
+      if (/\b403\b/.test(msg) || /forbidden/i.test(msg)) {
+        throw new MarketDataError(
+          `Market data blocked for ${normalized} (forbidden). Symbol was not added.`,
+        );
+      }
+      throw new MarketDataError(
+        msg.includes("not added")
+          ? msg
+          : `${msg} — symbol was not added.`,
+      );
+    }
+    throw new MarketDataError(
+      `Could not verify ${normalized} — symbol was not added. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 interface FinnhubSentimentResponse {

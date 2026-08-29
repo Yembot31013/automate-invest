@@ -229,6 +229,11 @@ export async function saveChatMessages<T>(
   await getRedis().set(userChatKey(userId), trimmed, { ex: CHAT_TTL_SECONDS });
 }
 
+/** Wipe persisted sidekick thread for this user (watchlist/paper untouched). */
+export async function clearChatMessages(userId: string): Promise<void> {
+  await getRedis().del(userChatKey(userId));
+}
+
 export {
   ALERT_TTL_SECONDS,
   DEFAULT_PAPER_CASH,

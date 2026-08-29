@@ -7,10 +7,11 @@ import {
   type UIMessage,
 } from "ai";
 
-import { SIGNAL_DESK_SYSTEM_PROMPT } from "@/lib/agent/prompt";
+import { buildDeskInstructions } from "@/lib/agent/prompt";
 import { createDeskTools } from "@/lib/agent/tools";
+import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { logger } from "@/lib/logger";
-import { getChatMessages, saveChatMessages } from "@/lib/redis";
+import { getChatMessages, saveChatMessages, clearChatMessages } from "@/lib/redis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,8 +23,27 @@ export async function GET() {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const messages = await getChatMessages<UIMessage>(userId);
+  const messages = withUniqueMessageIds(
+    await getChatMessages<UIMessage>(userId),
+  );
   return Response.json({ messages });
+}
+
+export async function DELETE() {
+  const { userId } = await auth();
+  if (!userId) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  try {
+    await clearChatMessages(userId);
+    return Response.json({ ok: true, messages: [] });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to clear chat";
+    logger.error("api/chat", message, { userId });
+    return Response.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -41,11 +61,11 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as { messages?: UIMessage[] };
-    const messages = body.messages ?? [];
+    const messages = withUniqueMessageIds(body.messages ?? []);
 
     const result = streamText({
       model: google("gemini-2.5-pro"),
-      instructions: SIGNAL_DESK_SYSTEM_PROMPT,
+      instructions: buildDeskInstructions(),
       messages: await convertToModelMessages(messages),
       tools: createDeskTools(userId),
       stopWhen: isStepCount(8),
@@ -55,7 +75,10 @@ export async function POST(request: Request) {
       originalMessages: messages,
       onFinish: async ({ messages: nextMessages }) => {
         try {
-          await saveChatMessages(userId, nextMessages);
+          await saveChatMessages(
+            userId,
+            withUniqueMessageIds(nextMessages),
+          );
         } catch (error) {
           logger.error("api/chat", "persist failed", {
             userId,

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+import { verifyTradableSymbol } from "@/lib/market";
 import {
   getPortfolioSummary,
   loadSnapshot,
@@ -29,7 +30,9 @@ function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
     recentCloses: snapshot.closes.slice(-10).map((v) => Number(v.toFixed(2))),
     headlines: (snapshot.headlines ?? []).map((h) => ({
       headline: h.headline,
+      summary: h.summary?.slice(0, 280) || null,
       source: h.source,
+      url: h.url || null,
       datetime: h.datetime,
     })),
   };
@@ -39,7 +42,7 @@ export function createDeskTools(userId: string) {
   return {
     getSnapshot: tool({
       description:
-        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines).",
+        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). After calling, explain headlines in plain English — do not only list titles.",
       inputSchema: z.object({
         symbol: z.string().describe("Ticker symbol, e.g. NVDA"),
         exchange: z
@@ -64,18 +67,29 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add a symbol to the user's watchlist (and cron only while someone still watches it).",
+        "Add a symbol to the user's watchlist after verifying market data. Do not claim it was added if verification fails.",
       inputSchema: z.object({
         symbol: z.string(),
         exchange: z.string().optional(),
       }),
       execute: async ({ symbol, exchange }) => {
-        const watchlist = await addToUserWatchlist(
-          userId,
-          symbol,
-          exchange ?? "NASDAQ",
-        );
-        return { ok: true, watchlist };
+        try {
+          const verified = await verifyTradableSymbol(symbol);
+          const watchlist = await addToUserWatchlist(
+            userId,
+            verified,
+            exchange ?? "NASDAQ",
+          );
+          return { ok: true, watchlist };
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not verify symbol — not added",
+          };
+        }
       },
     }),
 
