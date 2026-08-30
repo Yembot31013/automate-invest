@@ -19,6 +19,7 @@ import {
   type ToastState,
 } from "@/components/ui/Feedback";
 import { Tip } from "@/components/ui/Tip";
+import { MAX_USER_WATCHLIST } from "@/lib/limits";
 
 type DeskSnapshot = {
   symbol: string;
@@ -100,6 +101,7 @@ function sidekickDeedLine(summary: string): string {
 export function DeskShell() {
   const [snapshots, setSnapshots] = useState<DeskSnapshot[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioPayload | null>(null);
+  const [watchlistCount, setWatchlistCount] = useState(0);
   const [symbolInput, setSymbolInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -181,9 +183,11 @@ export function DeskShell() {
         const data = (await res.json()) as {
           snapshots: DeskSnapshot[];
           portfolio: PortfolioPayload;
+          watchlist?: Array<{ symbol: string }>;
         };
         setSnapshots(data.snapshots ?? []);
         setPortfolio(data.portfolio ?? null);
+        setWatchlistCount(data.watchlist?.length ?? data.snapshots?.length ?? 0);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to load desk";
@@ -490,11 +494,11 @@ export function DeskShell() {
       >
         <p className="font-mono-label">Add ticker</p>
         <p className="text-[0.7rem] leading-snug text-[var(--muted)]">
-          We check the market first. Fake tickers never get saved.
+          {watchlistCount}/{MAX_USER_WATCHLIST} slots · we verify before saving
         </p>
         <div className="flex gap-2">
           <Tip
-            label="Enter a stock ticker like AAPL or TSLA"
+            label="Stock ticker or crypto pair (allowlist)"
             className="min-w-0 flex-1"
             as="div"
             side="top"
@@ -503,15 +507,25 @@ export function DeskShell() {
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
               placeholder="NVDA"
-              disabled={busyAdd}
+              disabled={busyAdd || watchlistCount >= MAX_USER_WATCHLIST}
               aria-label="Ticker symbol to monitor"
               className="soft-field flex-1 !py-2"
             />
           </Tip>
-          <Tip label="Verify this ticker and add it to your watchlist">
+          <Tip
+            label={
+              watchlistCount >= MAX_USER_WATCHLIST
+                ? `Watchlist full (${MAX_USER_WATCHLIST}). Remove one first.`
+                : "Verify this ticker and add it to your watchlist"
+            }
+          >
             <button
               type="submit"
-              disabled={busyAdd || !symbolInput.trim()}
+              disabled={
+                busyAdd ||
+                !symbolInput.trim() ||
+                watchlistCount >= MAX_USER_WATCHLIST
+              }
               className="btn-primary !px-3 !py-2 text-xs"
             >
               {busyAdd ? (

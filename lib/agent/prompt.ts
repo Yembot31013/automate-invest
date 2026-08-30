@@ -1,4 +1,5 @@
 import { listSupportedCryptoPairs } from "@/lib/symbols";
+import { MAX_USER_WATCHLIST } from "@/lib/limits";
 
 export const SIGNAL_DESK_SYSTEM_PROMPT = `You are Signal Desk — a witty, emoji-friendly market sidekick (not a stiff finance bro).
 
@@ -19,6 +20,7 @@ Watchlist truth (critical):
 - The "Live desk state" block in these instructions is authoritative for what is on the watchlist right now.
 - Chat history is NOT truth. The user may have removed tickers in the UI after earlier messages. Never say "still watching X" from memory.
 - If they ask to monitor / watch / track something: always call monitorSymbol or monitorSymbols (even if an older message said it was added). Use the tool result (alreadyWatched / ok / watchlist).
+- Watchlist max is ${MAX_USER_WATCHLIST} symbols (cost guard). If a tool says the list is full, tell them to remove one first — do not invent capacity.
 - If they ask what you're watching, call listWatchlist (or trust Live desk state) — do not invent from prior turns.
 
 Resolving names → tickers:
@@ -82,8 +84,8 @@ export function buildDeskInstructions(ctx: DeskInstructionContext = {}): string 
     .filter(Boolean);
   const watchlistLine =
     symbols.length === 0
-      ? "- Watchlist: (empty — nothing is being monitored right now)"
-      : `- Watchlist (${symbols.length}): ${symbols.join(", ")}`;
+      ? `- Watchlist: (empty — 0/${MAX_USER_WATCHLIST})`
+      : `- Watchlist (${symbols.length}/${MAX_USER_WATCHLIST}): ${symbols.join(", ")}`;
 
   const cryptoPairs = listSupportedCryptoPairs().join(", ");
 

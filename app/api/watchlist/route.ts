@@ -6,6 +6,7 @@ import {
   addToUserWatchlist,
   getUserWatchlist,
   removeFromUserWatchlist,
+  WatchlistLimitError,
 } from "@/lib/redis";
 import {
   defaultExchangeForSymbol,
@@ -78,9 +79,11 @@ export async function POST(request: Request) {
     console.error("[watchlist] POST:", message);
     const status =
       error instanceof MarketDataError ||
+      error instanceof WatchlistLimitError ||
       message.includes("required") ||
       message.includes("No live quote") ||
-      message.includes("Could not verify")
+      message.includes("Could not verify") ||
+      message.includes("Watchlist is full")
         ? 400
         : 500;
     return NextResponse.json({ error: message }, { status });

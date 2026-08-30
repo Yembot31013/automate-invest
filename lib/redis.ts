@@ -1,6 +1,21 @@
 import { Redis } from "@upstash/redis";
 
+import { MAX_USER_WATCHLIST } from "@/lib/limits";
 import type { PaperPosition, WatchlistEntry } from "@/types";
+
+export class WatchlistLimitError extends Error {
+  readonly limit: number;
+  readonly current: number;
+
+  constructor(current: number, limit = MAX_USER_WATCHLIST) {
+    super(
+      `Watchlist is full (${current}/${limit}). Remove a ticker before adding another.`,
+    );
+    this.name = "WatchlistLimitError";
+    this.limit = limit;
+    this.current = current;
+  }
+}
 
 const SYSTEM_WATCHLIST_KEY = "watchlist:system";
 const LEGACY_WATCHLIST_KEY = "watchlist";
@@ -159,6 +174,9 @@ export async function addToUserWatchlist(
     const exchangeLabel = exchange.trim().toUpperCase() || "NASDAQ";
 
     if (!list.some((entry) => entry.symbol === normalized)) {
+      if (list.length >= MAX_USER_WATCHLIST) {
+        throw new WatchlistLimitError(list.length);
+      }
       next = [
         ...list,
         {

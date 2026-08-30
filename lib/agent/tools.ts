@@ -15,6 +15,7 @@ import {
   removeFromUserWatchlist,
 } from "@/lib/redis";
 import { sendCapabilityGapEmail } from "@/lib/email/resend";
+import { MAX_USER_WATCHLIST } from "@/lib/limits";
 import {
   defaultExchangeForSymbol,
   findWatchlistSymbol,
@@ -81,7 +82,9 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended; crypto is allowlist-only (BTC/USD, ETH/USD, …). Always call when the user asks to monitor. Returns alreadyWatched / assetClass.",
+        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended; crypto is allowlist-only. Watchlist max is " +
+        String(MAX_USER_WATCHLIST) +
+        ". Always call when the user asks to monitor. Returns alreadyWatched / assetClass.",
       inputSchema: z.object({
         symbol: z
           .string()
@@ -124,7 +127,9 @@ export function createDeskTools(userId: string) {
 
     monitorSymbols: tool({
       description:
-        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Always call this when they ask to monitor — do not skip because of chat history. Reports per-symbol ok/alreadyWatched/error.",
+        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Cap is " +
+        String(MAX_USER_WATCHLIST) +
+        " total on the list. Reports per-symbol ok/alreadyWatched/error.",
       inputSchema: z.object({
         symbols: z
           .array(z.string())

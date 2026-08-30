@@ -14,6 +14,7 @@ import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Tip } from "@/components/ui/Tip";
 import { MarkdownBubble } from "@/components/desk/MarkdownBubble";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
+import { deskDeedForTool } from "@/lib/agent/deeds";
 
 export const CHAT_CHIPS = [
   {
@@ -182,37 +183,6 @@ export function DeskChat({
       focusSignal={focusSignal}
     />
   );
-}
-
-function toolTone(state: string): string {
-  const s = state.toLowerCase();
-  if (s.includes("error") || s.includes("fail")) return "tool-tint-error";
-  if (
-    s.includes("result") ||
-    s.includes("complete") ||
-    s.includes("output") ||
-    s === "done"
-  ) {
-    return "tool-tint-success";
-  }
-  return "tool-tint-running";
-}
-
-function friendlyToolState(state: string): string {
-  const s = state.toLowerCase();
-  if (s.includes("error") || s.includes("fail")) return "didn't work — see message";
-  if (
-    s.includes("result") ||
-    s.includes("complete") ||
-    s.includes("output") ||
-    s === "done"
-  ) {
-    return "done";
-  }
-  if (s.includes("call") || s.includes("partial") || s.includes("input")) {
-    return "running…";
-  }
-  return state;
 }
 
 function DeskChatSession({
@@ -549,33 +519,37 @@ function DeskChatSession({
                 const toolName = part.type.replace(/^tool-/, "");
                 const state =
                   "state" in part ? String(part.state) : "running";
-                const tone = toolTone(state);
+                const input = "input" in part ? part.input : undefined;
+                const deed = deskDeedForTool({ toolName, state, input });
+                const toneClass =
+                  deed.phase === "error"
+                    ? "desk-deed-error"
+                    : deed.phase === "done"
+                      ? "desk-deed-done"
+                      : "desk-deed-running";
                 return (
                   <Tip
                     key={partIndex}
-                    label={
-                      tone === "tool-tint-running"
-                        ? `Working on ${toolName} — please wait`
-                        : tone === "tool-tint-success"
-                          ? `${toolName} finished successfully`
-                          : `${toolName} had a problem`
-                    }
+                    label={deed.hint}
                     as="div"
-                    className="mt-2 w-full"
+                    className="mt-1 w-full"
                     side="top"
                   >
                     <div
-                      className={`rounded-[14px] px-3 py-2 text-xs ${tone}`}
+                      className={`desk-deed ${toneClass}`}
+                      role="status"
+                      aria-label={deed.label}
                     >
-                      <span className="inline-flex items-center gap-2 font-mono-label !text-[var(--ink)]">
-                        {tone === "tool-tint-running" && (
-                          <Spinner size="sm" label={toolName} />
+                      <span className="desk-deed-mark" aria-hidden="true">
+                        {deed.phase === "running" ? (
+                          <span className="desk-deed-pulse" />
+                        ) : deed.phase === "done" ? (
+                          "✓"
+                        ) : (
+                          "!"
                         )}
-                        tool · {toolName}
                       </span>
-                      <span className="ml-2 opacity-80">
-                        {friendlyToolState(state)}
-                      </span>
+                      <span className="desk-deed-label">{deed.label}</span>
                     </div>
                   </Tip>
                 );

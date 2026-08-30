@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { mapPool } from "@/lib/concurrency";
+import { DESK_SNAPSHOT_LIMIT } from "@/lib/limits";
 import { logger } from "@/lib/logger";
 import { getPortfolioSummary, loadSnapshot } from "@/lib/paper";
 import { getUserWatchlist } from "@/lib/redis";
@@ -20,32 +21,36 @@ export async function GET() {
     const watchlist = await getUserWatchlist(userId);
     const portfolio = await getPortfolioSummary(userId);
 
-    const snapshots = await mapPool(watchlist.slice(0, 12), 4, async (entry) => {
-      try {
-        const snap = await loadSnapshot(entry.symbol, entry.exchange);
-        return {
-          symbol: snap.symbol,
-          exchange: snap.exchange,
-          currentPrice: snap.currentPrice,
-          changePct: snap.changePct,
-          volumeRatio: snap.volumeRatio,
-          pctBelowSma14: snap.pctBelowSma14,
-          sentimentScore: snap.sentimentScore,
-          closes: snap.closes.slice(-20),
-          headline: snap.headlines[0]?.headline ?? null,
-        };
-      } catch (error) {
-        logger.error("api/desk", "snapshot failed", {
-          symbol: entry.symbol,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          symbol: entry.symbol,
-          exchange: entry.exchange,
-          error: error instanceof Error ? error.message : "Failed",
-        };
-      }
-    });
+    const snapshots = await mapPool(
+      watchlist.slice(0, DESK_SNAPSHOT_LIMIT),
+      4,
+      async (entry) => {
+        try {
+          const snap = await loadSnapshot(entry.symbol, entry.exchange);
+          return {
+            symbol: snap.symbol,
+            exchange: snap.exchange,
+            currentPrice: snap.currentPrice,
+            changePct: snap.changePct,
+            volumeRatio: snap.volumeRatio,
+            pctBelowSma14: snap.pctBelowSma14,
+            sentimentScore: snap.sentimentScore,
+            closes: snap.closes.slice(-20),
+            headline: snap.headlines[0]?.headline ?? null,
+          };
+        } catch (error) {
+          logger.error("api/desk", "snapshot failed", {
+            symbol: entry.symbol,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            symbol: entry.symbol,
+            exchange: entry.exchange,
+            error: error instanceof Error ? error.message : "Failed",
+          };
+        }
+      },
+    );
 
     return NextResponse.json({
       watchlist,

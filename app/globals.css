@@ -903,6 +903,96 @@ body {
   color: var(--ink);
 }
 
+/* Sidekick desk deeds — product language over raw tool chrome */
+.desk-deed {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  padding: 0.4rem 0.75rem 0.4rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  box-shadow: var(--shadow-soft);
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.desk-deed-mark {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.desk-deed-running {
+  background: color-mix(in srgb, var(--lavender) 28%, var(--mix));
+}
+
+.desk-deed-running .desk-deed-mark {
+  background: color-mix(in srgb, var(--lavender) 55%, var(--white));
+}
+
+.desk-deed-done {
+  background: color-mix(in srgb, var(--green) 22%, var(--mix));
+}
+
+.desk-deed-done .desk-deed-mark {
+  background: color-mix(in srgb, var(--green) 45%, var(--white));
+}
+
+.desk-deed-error {
+  background: color-mix(in srgb, var(--orange) 24%, var(--mix));
+}
+
+.desk-deed-error .desk-deed-mark {
+  background: color-mix(in srgb, var(--orange) 42%, var(--white));
+}
+
+.desk-deed-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes desk-deed-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.desk-deed-pulse {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--ink);
+  animation: desk-deed-pulse 1.05s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-deed-pulse {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
 .metric-tile {
   border-radius: var(--radius-md);
   padding: 0.85rem 0.9rem;
