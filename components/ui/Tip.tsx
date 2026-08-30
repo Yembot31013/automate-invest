@@ -189,9 +189,16 @@ export function Tip({
         ref={anchorRef as never}
         className={`tip-anchor ${className}`.trim()}
         aria-describedby={open ? tipId : undefined}
-        onMouseEnter={show}
+        onMouseEnter={() => {
+          if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+            show();
+          }
+        }}
         onMouseLeave={hide}
-        onFocus={show}
+        onFocus={(e) => {
+          // Keyboard only — avoids sticky tips when tapping disabled Send on mobile.
+          if (e.currentTarget.matches(":focus-visible")) show();
+        }}
         onBlur={hide}
       >
         {children}

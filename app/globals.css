@@ -113,6 +113,41 @@ body {
   line-height: 1;
 }
 
+@media (max-width: 639px) {
+  .theme-toggle-compact {
+    padding: 0.45rem 0.55rem !important;
+    gap: 0 !important;
+  }
+
+  .theme-toggle-compact .theme-toggle-text {
+    display: none;
+  }
+
+  .status-toast {
+    top: auto;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    font-size: 0.78rem;
+    padding: 0.65rem 0.85rem;
+    max-width: calc(100vw - 1rem);
+  }
+
+  .desk-chat-header {
+    background: color-mix(in srgb, var(--white) 96%, transparent);
+  }
+
+  [data-theme="dark"] .desk-chat-header {
+    background: color-mix(in srgb, var(--white) 10%, var(--mix));
+  }
+
+  .desk-chat-chips {
+    background: color-mix(in srgb, var(--white) 96%, transparent);
+  }
+
+  [data-theme="dark"] .desk-chat-chips {
+    background: color-mix(in srgb, var(--white) 10%, var(--mix));
+  }
+}
+
 .soft-card {
   background: color-mix(in srgb, var(--white) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--mix) 70%, var(--ink));

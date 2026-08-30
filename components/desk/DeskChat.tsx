@@ -386,32 +386,32 @@ function DeskChatSession({
 
   return (
     <section
-      className="soft-card-strong fade-up flex h-full min-h-[520px] flex-1 flex-col overflow-hidden"
+      className="desk-chat soft-card-strong fade-up flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:min-h-[520px]"
       aria-busy={busy}
     >
-      <header className="flex items-start justify-between gap-3 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-5 py-4">
-        <div>
+      <header className="desk-chat-header shrink-0 flex items-start justify-between gap-2 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-4 py-3 sm:gap-3 sm:px-5 sm:py-4">
+        <div className="min-w-0">
           <p className="font-mono-label">Primary stage</p>
-          <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-[var(--ink)]">
+          <h2 className="mt-0.5 text-xl font-extrabold tracking-tight text-[var(--ink)] sm:mt-1 sm:text-2xl">
             Sidekick chat
           </h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
+          <p className="mt-1 hidden text-sm text-[var(--muted)] sm:block">
             Ask in plain English. Tools fetch real numbers — we never invent
             prices.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <Tip
             label="Wipe this thread only — watchlist & paper book stay"
             side="bottom"
           >
             <button
               type="button"
-              className="btn-ghost !px-2.5 !py-1.5 text-xs"
+              className="btn-ghost !px-2 !py-1.5 text-[0.65rem] sm:!px-2.5 sm:text-xs"
               disabled={busy || busyClear || messages.length === 0}
               onClick={() => setConfirmClear(true)}
             >
-              Clear chat
+              Clear
             </button>
           </Tip>
           <Tip
@@ -423,7 +423,7 @@ function DeskChatSession({
             side="bottom"
           >
             <span
-              className={`badge-pill ${
+              className={`badge-pill !px-2 !py-1 text-[0.65rem] sm:!px-2.5 sm:text-xs ${
                 busy
                   ? "bg-[color-mix(in_srgb,var(--blue)_45%,var(--mix))]"
                   : "bg-[color-mix(in_srgb,var(--yellow)_60%,var(--mix))]"
@@ -442,43 +442,31 @@ function DeskChatSession({
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-2 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-5 py-3">
-        {CHAT_CHIPS.map((chip) => (
-          <Tip
-            key={chip.label}
-            label={`${chip.hint} — fills the box so you can edit first`}
-          >
-            <button
-              type="button"
-              onClick={() => requestFillDraft(chip.text)}
-              className="badge-pill tilt-hover"
-              style={{
-                background: `color-mix(in srgb, ${chip.tint} 45%, var(--mix))`,
-              }}
+      <div className="desk-chat-chips shrink-0 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-4 py-2.5 sm:px-5 sm:py-3">
+        <div className="flex flex-nowrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {CHAT_CHIPS.map((chip) => (
+            <Tip
+              key={chip.label}
+              label={`${chip.hint} — fills the box so you can edit first`}
             >
-              {chip.label}
-            </button>
-          </Tip>
-        ))}
-      </div>
-
-      {busy && (
-        <div className="px-4 pt-3">
-          <div className="busy-banner" role="status" aria-live="polite">
-            <Spinner size="sm" label="Thinking" />
-            <span>
-              {status === "submitted"
-                ? "Got it — starting tools & reply…"
-                : "Streaming answer — you can keep reading while it writes."}
-            </span>
-            <PulseDots label="Thinking" />
-          </div>
+              <button
+                type="button"
+                onClick={() => requestFillDraft(chip.text)}
+                className="badge-pill tilt-hover shrink-0"
+                style={{
+                  background: `color-mix(in srgb, ${chip.tint} 45%, var(--mix))`,
+                }}
+              >
+                {chip.label}
+              </button>
+            </Tip>
+          ))}
         </div>
-      )}
+      </div>
 
       <div
         ref={scrollerRef}
-        className="flex-1 space-y-3 overflow-y-auto px-5 py-5"
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5"
       >
         {hydrateError && (
           <p className="rounded-[14px] bg-[color-mix(in_srgb,var(--lavender)_30%,var(--mix))] px-3 py-2 text-xs text-[var(--ink)]">
@@ -558,7 +546,7 @@ function DeskChatSession({
             })}
           </div>
         ))}
-        {busy && (
+        {status === "submitted" && (
           <div className="thinking-bubble fade-up" aria-live="polite">
             <Spinner size="sm" label="Thinking" />
             Sidekick is on it
@@ -642,7 +630,7 @@ function DeskChatSession({
         </div>
         <p className="composer-hint">
           {busy
-            ? "Composer locked while the sidekick answers — almost done."
+            ? "Locked while answering…"
             : "Enter = new line · Ctrl/⌘+Enter or Send to submit."}
         </p>
       </form>

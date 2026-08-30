@@ -158,24 +158,10 @@ export function DeskShell() {
     deedTimer.current = setTimeout(() => setSidekickDeed(null), 8000);
   }, []);
 
-  const handleChatBusy = useCallback(
-    (busy: boolean) => {
-      setChatBusy(busy);
-      if (busy) {
-        showToast({
-          kind: "busy",
-          message: "Sidekick is thinking — tools may run…",
-        });
-        return;
-      }
-      setToast((prev) =>
-        prev?.kind === "busy" && prev.message.startsWith("Sidekick")
-          ? null
-          : prev,
-      );
-    },
-    [showToast],
-  );
+  const handleChatBusy = useCallback((busy: boolean) => {
+    setChatBusy(busy);
+    // Chat already shows Ready/Answering + stream state — skip duplicate toast on mobile.
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1006,8 +992,8 @@ export function DeskShell() {
         className="blob bottom-[-8rem] left-[30%] h-72 w-72 bg-[var(--pink)]"
       />
 
-      <div className="relative z-10 mx-auto flex h-[100dvh] max-w-[1600px] flex-col gap-3 p-3 md:gap-4 md:p-4">
-        <div className="flex items-center gap-2 lg:hidden">
+      <div className="relative z-10 mx-auto flex h-[100dvh] max-w-[1600px] flex-col gap-2 overflow-hidden p-2 sm:gap-3 sm:p-3 md:gap-4 md:p-4">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:hidden">
           {(
             [
               ["list", "Agents", "Watchlist & add tickers"],
@@ -1015,11 +1001,11 @@ export function DeskShell() {
               ["activity", "Reports", "Paper book, tape & scan"],
             ] as const
           ).map(([id, label, hint]) => (
-            <Tip key={id} label={hint} className="flex-1" as="div">
+            <Tip key={id} label={hint} className="min-w-0 flex-1" as="div">
               <button
                 type="button"
                 onClick={() => setMobilePanel(id)}
-                className={`w-full rounded-full px-3 py-2 text-xs font-bold transition ${
+                className={`w-full rounded-full px-2 py-2 text-xs font-bold transition sm:px-3 ${
                   mobilePanel === id
                     ? "bg-[var(--yellow)] text-[var(--ink)] shadow-[var(--shadow-soft)]"
                     : "bg-[color-mix(in_srgb,var(--white)_70%,transparent)] text-[var(--muted)] hover:bg-[var(--white)]"
@@ -1039,12 +1025,12 @@ export function DeskShell() {
 
         <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[240px_minmax(0,1fr)_300px] xl:grid-cols-[260px_minmax(0,1fr)_320px]">
           <div
-            className={`min-h-0 ${mobilePanel === "list" ? "block" : "hidden"} lg:block`}
+            className={`min-h-0 overflow-hidden ${mobilePanel === "list" ? "block" : "hidden"} lg:block`}
           >
             {sidebar}
           </div>
           <div
-            className={`min-h-0 min-w-0 ${mobilePanel === "chat" ? "flex" : "hidden"} lg:flex`}
+            className={`min-h-0 min-w-0 overflow-hidden ${mobilePanel === "chat" ? "flex" : "hidden"} lg:flex`}
           >
             <DeskChat
               externalPrompt={externalPrompt}
@@ -1068,7 +1054,7 @@ export function DeskShell() {
             />
           </div>
           <div
-            className={`min-h-0 ${mobilePanel === "activity" ? "block" : "hidden"} lg:block`}
+            className={`min-h-0 overflow-hidden ${mobilePanel === "activity" ? "block" : "hidden"} lg:block`}
           >
             {activity}
           </div>
