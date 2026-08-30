@@ -67,7 +67,7 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add a symbol to the user's watchlist after verifying market data. Do not claim it was added if verification fails.",
+        "Add one ticker to the user's watchlist after verifying market data. For multiple tickers, call once per symbol (or prefer monitorSymbols). Do not claim success if ok is false.",
       inputSchema: z.object({
         symbol: z.string(),
         exchange: z.string().optional(),
@@ -80,16 +80,65 @@ export function createDeskTools(userId: string) {
             verified,
             exchange ?? "NASDAQ",
           );
-          return { ok: true, watchlist };
+          return { ok: true, symbol: verified, watchlist };
         } catch (error) {
           return {
             ok: false,
+            symbol: symbol.trim().toUpperCase(),
             error:
               error instanceof Error
                 ? error.message
                 : "Could not verify symbol — not added",
           };
         }
+      },
+    }),
+
+    monitorSymbols: tool({
+      description:
+        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Reports per-symbol ok/error — never claim a failed symbol was added.",
+      inputSchema: z.object({
+        symbols: z
+          .array(z.string())
+          .min(1)
+          .max(10)
+          .describe("Ticker symbols to monitor"),
+        exchange: z.string().optional(),
+      }),
+      execute: async ({ symbols, exchange }) => {
+        const results: Array<{
+          symbol: string;
+          ok: boolean;
+          error?: string;
+        }> = [];
+
+        for (const raw of symbols) {
+          try {
+            const verified = await verifyTradableSymbol(raw);
+            await addToUserWatchlist(
+              userId,
+              verified,
+              exchange ?? "NASDAQ",
+            );
+            results.push({ symbol: verified, ok: true });
+          } catch (error) {
+            results.push({
+              symbol: raw.trim().toUpperCase(),
+              ok: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Could not verify symbol — not added",
+            });
+          }
+        }
+
+        const watchlist = await getUserWatchlist(userId);
+        return {
+          ok: results.every((r) => r.ok),
+          results,
+          watchlist,
+        };
       },
     }),
 

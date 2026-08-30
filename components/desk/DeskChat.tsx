@@ -47,13 +47,50 @@ type DeskChatProps = {
   externalPrompt?: string | null;
   onExternalPromptConsumed?: () => void;
   onBusyChange?: (busy: boolean) => void;
+  /** Fired when chat tools mutate watchlist / paper book so the desk can refresh. */
+  onDeskMutated?: (summary: string) => void;
 };
+
+const DESK_MUTATING_TOOLS = new Set([
+  "monitorSymbol",
+  "monitorSymbols",
+  "unmonitorSymbol",
+  "paperBuy",
+  "paperSell",
+]);
+
+function isToolDone(state: string): boolean {
+  const s = state.toLowerCase();
+  return (
+    s.includes("result") ||
+    s.includes("complete") ||
+    s.includes("output") ||
+    s === "done"
+  );
+}
+
+function toolMutationSummary(toolName: string): string {
+  switch (toolName) {
+    case "monitorSymbol":
+    case "monitorSymbols":
+      return "Watchlist updated";
+    case "unmonitorSymbol":
+      return "Ticker removed";
+    case "paperBuy":
+      return "Paper buy filled";
+    case "paperSell":
+      return "Paper sell filled";
+    default:
+      return "Desk updated";
+  }
+}
 
 export function DeskChat({
   onPrompt,
   externalPrompt,
   onExternalPromptConsumed,
   onBusyChange,
+  onDeskMutated,
 }: DeskChatProps) {
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -124,6 +161,7 @@ export function DeskChat({
       externalPrompt={externalPrompt}
       onExternalPromptConsumed={onExternalPromptConsumed}
       onBusyChange={onBusyChange}
+      onDeskMutated={onDeskMutated}
     />
   );
 }
@@ -167,6 +205,7 @@ function DeskChatSession({
   externalPrompt,
   onExternalPromptConsumed,
   onBusyChange,
+  onDeskMutated,
 }: {
   transport: DefaultChatTransport<UIMessage>;
   initialMessages: UIMessage[];
@@ -175,6 +214,7 @@ function DeskChatSession({
   externalPrompt?: string | null;
   onExternalPromptConsumed?: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onDeskMutated?: (summary: string) => void;
 }) {
   const { messages, sendMessage, setMessages, status, error } = useChat({
     transport,
@@ -192,6 +232,10 @@ function DeskChatSession({
   inputValueRef.current = input;
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
+  const onDeskMutatedRef = useRef(onDeskMutated);
+  onDeskMutatedRef.current = onDeskMutated;
+  const seenMutationsRef = useRef<Set<string>>(new Set());
+  const pendingSyncRef = useRef<string | null>(null);
 
   function focusComposer() {
     requestAnimationFrame(() => {
@@ -262,6 +306,63 @@ function DeskChatSession({
 
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
+  }, [busy]);
+
+  useEffect(() => {
+    // Seed seen set from history so reloads don't re-sync old tools.
+    if (seenMutationsRef.current.size > 0) return;
+    for (const message of initialMessages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts ?? []) {
+        if (!part.type.startsWith("tool-")) continue;
+        const toolName = part.type.replace(/^tool-/, "");
+        if (!DESK_MUTATING_TOOLS.has(toolName)) continue;
+        const state = "state" in part ? String(part.state) : "";
+        if (!isToolDone(state)) continue;
+        const toolCallId =
+          "toolCallId" in part && typeof part.toolCallId === "string"
+            ? part.toolCallId
+            : toolName;
+        seenMutationsRef.current.add(`${message.id}:${toolCallId}`);
+      }
+    }
+  }, [initialMessages]);
+
+  useEffect(() => {
+    let latestSummary: string | null = null;
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts ?? []) {
+        if (!part.type.startsWith("tool-")) continue;
+        const toolName = part.type.replace(/^tool-/, "");
+        if (!DESK_MUTATING_TOOLS.has(toolName)) continue;
+        const state = "state" in part ? String(part.state) : "";
+        if (!isToolDone(state)) continue;
+        const toolCallId =
+          "toolCallId" in part && typeof part.toolCallId === "string"
+            ? part.toolCallId
+            : toolName;
+        const key = `${message.id}:${toolCallId}`;
+        if (seenMutationsRef.current.has(key)) continue;
+        seenMutationsRef.current.add(key);
+        latestSummary = toolMutationSummary(toolName);
+      }
+    }
+    if (!latestSummary) return;
+    // Wait until the turn settles so multiple parallel tools sync once.
+    if (busy) {
+      pendingSyncRef.current = latestSummary;
+      return;
+    }
+    pendingSyncRef.current = null;
+    onDeskMutatedRef.current?.(latestSummary);
+  }, [messages, busy]);
+
+  useEffect(() => {
+    if (busy || !pendingSyncRef.current) return;
+    const summary = pendingSyncRef.current;
+    pendingSyncRef.current = null;
+    onDeskMutatedRef.current?.(summary);
   }, [busy]);
 
   useEffect(() => {

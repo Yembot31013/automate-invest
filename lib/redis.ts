@@ -45,6 +45,38 @@ function alertKey(symbol: string, type: string): string {
   return `alert:${normalizeSymbol(symbol)}:${type}`;
 }
 
+function userWatchlistLockKey(userId: string): string {
+  return `lock:user:${userId}:watchlist`;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Serialize watchlist writes — parallel tool calls otherwise race and drop symbols. */
+async function withUserWatchlistLock<T>(
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const redis = getRedis();
+  const lockKey = userWatchlistLockKey(userId);
+  const maxAttempts = 12;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const acquired = await redis.set(lockKey, "1", { nx: true, ex: 10 });
+    if (acquired) {
+      try {
+        return await fn();
+      } finally {
+        await redis.del(lockKey);
+      }
+    }
+    await sleep(35 + attempt * 25);
+  }
+
+  throw new Error("Watchlist is busy — try again in a moment");
+}
+
 export async function wasAlertedRecently(
   symbol: string,
   type: string,
@@ -120,38 +152,40 @@ export async function addToUserWatchlist(
     throw new Error("Symbol is required");
   }
 
-  const redis = getRedis();
-  const list = await getUserWatchlist(userId);
-  let next = list;
-  const exchangeLabel = exchange.trim().toUpperCase() || "NASDAQ";
+  return withUserWatchlistLock(userId, async () => {
+    const redis = getRedis();
+    const list = await getUserWatchlist(userId);
+    let next = list;
+    const exchangeLabel = exchange.trim().toUpperCase() || "NASDAQ";
 
-  if (!list.some((entry) => entry.symbol === normalized)) {
-    next = [
-      ...list,
-      {
-        symbol: normalized,
-        exchange: exchangeLabel,
-        addedAt: new Date().toISOString(),
-      },
-    ];
-    await writeWatchlist(userWatchlistKey(userId), next);
-  }
+    if (!list.some((entry) => entry.symbol === normalized)) {
+      next = [
+        ...list,
+        {
+          symbol: normalized,
+          exchange: exchangeLabel,
+          addedAt: new Date().toISOString(),
+        },
+      ];
+      await writeWatchlist(userWatchlistKey(userId), next);
+    }
 
-  await redis.sadd(symbolWatchersKey(normalized), userId);
+    await redis.sadd(symbolWatchersKey(normalized), userId);
 
-  const system = await getSystemWatchlist();
-  if (!system.some((entry) => entry.symbol === normalized)) {
-    await writeWatchlist(SYSTEM_WATCHLIST_KEY, [
-      ...system.filter((e) => e.symbol !== normalized),
-      {
-        symbol: normalized,
-        exchange: exchangeLabel,
-        addedAt: new Date().toISOString(),
-      },
-    ]);
-  }
+    const system = await getSystemWatchlist();
+    if (!system.some((entry) => entry.symbol === normalized)) {
+      await writeWatchlist(SYSTEM_WATCHLIST_KEY, [
+        ...system.filter((e) => e.symbol !== normalized),
+        {
+          symbol: normalized,
+          exchange: exchangeLabel,
+          addedAt: new Date().toISOString(),
+        },
+      ]);
+    }
 
-  return next;
+    return next;
+  });
 }
 
 /**
@@ -162,22 +196,25 @@ export async function removeFromUserWatchlist(
   symbol: string,
 ): Promise<WatchlistEntry[]> {
   const normalized = normalizeSymbol(symbol);
-  const redis = getRedis();
-  const list = await getUserWatchlist(userId);
-  const next = list.filter((entry) => entry.symbol !== normalized);
-  await writeWatchlist(userWatchlistKey(userId), next);
-  await redis.srem(symbolWatchersKey(normalized), userId);
 
-  const remaining = await redis.smembers(symbolWatchersKey(normalized));
-  if (remaining.length === 0) {
-    const system = await getSystemWatchlist();
-    await writeWatchlist(
-      SYSTEM_WATCHLIST_KEY,
-      system.filter((entry) => entry.symbol !== normalized),
-    );
-  }
+  return withUserWatchlistLock(userId, async () => {
+    const redis = getRedis();
+    const list = await getUserWatchlist(userId);
+    const next = list.filter((entry) => entry.symbol !== normalized);
+    await writeWatchlist(userWatchlistKey(userId), next);
+    await redis.srem(symbolWatchersKey(normalized), userId);
 
-  return next;
+    const remaining = await redis.smembers(symbolWatchersKey(normalized));
+    if (remaining.length === 0) {
+      const system = await getSystemWatchlist();
+      await writeWatchlist(
+        SYSTEM_WATCHLIST_KEY,
+        system.filter((entry) => entry.symbol !== normalized),
+      );
+    }
+
+    return next;
+  });
 }
 
 export async function getPaperPositions(

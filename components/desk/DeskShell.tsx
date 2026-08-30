@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountButton } from "@/components/auth/AccountButton";
 import { CHAT_CHIPS, DeskChat } from "@/components/desk/DeskChat";
 import { Sparkline } from "@/components/desk/Sparkline";
+import { TradingViewModal } from "@/components/desk/TradingViewModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import {
   BusyBanner,
@@ -55,6 +56,20 @@ function formatUsd(value: number): string {
   }).format(value);
 }
 
+/** Compact money for tight metric tiles ($100k, $1.2M) — avoids overflow. */
+function formatUsdCompact(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    const signed = value < 0 ? "-" : "";
+    return `${signed}$${(abs / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2)}M`;
+  }
+  if (abs >= 10_000) {
+    const signed = value < 0 ? "-" : "";
+    return `${signed}$${(abs / 1_000).toFixed(abs >= 100_000 ? 0 : 1)}k`;
+  }
+  return formatUsd(value);
+}
+
 function formatPct(value: number): string {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}%`;
@@ -70,6 +85,10 @@ export function DeskShell() {
   const [busyRemove, setBusyRemove] = useState<string | null>(null);
   const [busyScan, setBusyScan] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
+  const [chartSymbol, setChartSymbol] = useState<{
+    symbol: string;
+    exchange: string;
+  } | null>(null);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -143,6 +162,22 @@ export function DeskShell() {
       }
     },
     [showToast],
+  );
+
+  const syncDeskFromSidekick = useCallback(
+    async (reason: string) => {
+      showToast({
+        kind: "busy",
+        message: reason,
+      });
+      setRefreshing(true);
+      await refresh({ quiet: true });
+      showToast({
+        kind: "ok",
+        message: "Desk updated from the sidekick.",
+      });
+    },
+    [refresh, showToast],
   );
 
   useEffect(() => {
@@ -566,7 +601,11 @@ export function DeskShell() {
           </div>
         ) : portfolio ? (
           <div className="grid grid-cols-2 gap-2">
-            <Tip label="Cash + market value of open paper positions" as="div">
+            <Tip
+              label="Cash + market value of open paper positions"
+              as="div"
+              className="min-w-0"
+            >
               <div
                 className="metric-tile"
                 style={{
@@ -574,14 +613,15 @@ export function DeskShell() {
                 }}
               >
                 <p className="font-mono-label">Equity</p>
-                <p className="mt-1 text-lg font-extrabold tracking-tight">
-                  {formatUsd(portfolio.equity)}
+                <p className="metric-value" title={formatUsd(portfolio.equity)}>
+                  {formatUsdCompact(portfolio.equity)}
                 </p>
               </div>
             </Tip>
             <Tip
               label="Unrealized profit or loss on open paper trades"
               as="div"
+              className="min-w-0"
             >
               <div
                 className="metric-tile"
@@ -592,15 +632,22 @@ export function DeskShell() {
                 }}
               >
                 <p className="font-mono-label">PnL</p>
-                <p className="mt-1 text-lg font-extrabold tracking-tight">
-                  {formatUsd(portfolio.totalUnrealizedPnl)}
+                <p
+                  className="metric-value"
+                  title={formatUsd(portfolio.totalUnrealizedPnl)}
+                >
+                  {formatUsdCompact(portfolio.totalUnrealizedPnl)}
                 </p>
                 <p className="text-xs text-[var(--muted)]">
                   {formatPct(portfolio.totalUnrealizedPnlPct)}
                 </p>
               </div>
             </Tip>
-            <Tip label="Cash left in your $100k paper account" as="div">
+            <Tip
+              label="Cash left in your $100k paper account"
+              as="div"
+              className="min-w-0"
+            >
               <div
                 className="metric-tile"
                 style={{
@@ -608,12 +655,16 @@ export function DeskShell() {
                 }}
               >
                 <p className="font-mono-label">Cash</p>
-                <p className="mt-1 text-base font-extrabold">
-                  {formatUsd(portfolio.cash)}
+                <p className="metric-value" title={formatUsd(portfolio.cash)}>
+                  {formatUsdCompact(portfolio.cash)}
                 </p>
               </div>
             </Tip>
-            <Tip label="How many paper positions are currently open" as="div">
+            <Tip
+              label="How many paper positions are currently open"
+              as="div"
+              className="min-w-0"
+            >
               <div
                 className="metric-tile"
                 style={{
@@ -621,9 +672,7 @@ export function DeskShell() {
                 }}
               >
                 <p className="font-mono-label">Open</p>
-                <p className="mt-1 text-base font-extrabold">
-                  {portfolio.openCount}
-                </p>
+                <p className="metric-value">{portfolio.openCount}</p>
               </div>
             </Tip>
           </div>
@@ -635,6 +684,9 @@ export function DeskShell() {
         )}
 
         <p className="font-mono-label pt-2">Tape cards</p>
+        <p className="text-[0.7rem] text-[var(--muted)]">
+          Tap a card for TradingView · Remove stays on the button.
+        </p>
         {loading && snapshots.length === 0 ? (
           <div className="space-y-2" aria-busy="true">
             <div className="soft-card p-3">
@@ -656,13 +708,30 @@ export function DeskShell() {
               return (
                 <article
                   key={snap.symbol}
-                  className={`tilt-hover soft-card p-3 ${
+                  role="button"
+                  tabIndex={0}
+                  className={`tilt-hover soft-card cursor-pointer p-3 ${
                     busyRemove === snap.symbol ? "opacity-55" : ""
                   }`}
                   style={{
                     background: `color-mix(in srgb, ${ACCENTS[i % ACCENTS.length]} 18%, var(--mix))`,
                   }}
-                  title={`${snap.symbol}: price, day change, volume vs average, and distance from 14-day SMA`}
+                  title={`Open TradingView chart for ${snap.symbol}`}
+                  onClick={() =>
+                    setChartSymbol({
+                      symbol: snap.symbol,
+                      exchange: snap.exchange,
+                    })
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setChartSymbol({
+                        symbol: snap.symbol,
+                        exchange: snap.exchange,
+                      });
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -696,7 +765,10 @@ export function DeskShell() {
                           type="button"
                           aria-label={`Remove ${snap.symbol}`}
                           disabled={busyRemove === snap.symbol}
-                          onClick={() => setPendingRemove(snap.symbol)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingRemove(snap.symbol);
+                          }}
                           className="btn-ghost !px-2.5 !py-1 text-[0.65rem]"
                         >
                           {busyRemove === snap.symbol ? (
@@ -859,6 +931,14 @@ export function DeskShell() {
                 )
               }
               onBusyChange={handleChatBusy}
+              onDeskMutated={(summary) => {
+                setActivityLog((prev) =>
+                  [summary, ...prev].slice(0, 12),
+                );
+                void syncDeskFromSidekick(
+                  "Sidekick changed your desk — syncing…",
+                );
+              }}
             />
           </div>
           <div
@@ -890,6 +970,13 @@ export function DeskShell() {
         onConfirm={() => {
           if (pendingRemove) void removeSymbol(pendingRemove);
         }}
+      />
+
+      <TradingViewModal
+        open={chartSymbol != null}
+        symbol={chartSymbol?.symbol ?? ""}
+        exchange={chartSymbol?.exchange}
+        onClose={() => setChartSymbol(null)}
       />
 
       <StatusToast toast={toast} onDismiss={() => setToast(null)} />
