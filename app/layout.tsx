@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
@@ -18,6 +18,14 @@ export const metadata: Metadata = {
   title: "Signal Desk",
   description:
     "Your market sidekick — dips, breakouts, paper PnL, and chatty recommendations.",
+  applicationName: "Signal Desk",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffc93c" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0c10" },
+  ],
 };
 
 const themeBootScript = `(function(){try{var k='sd-theme';var t=localStorage.getItem(k);if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t;}catch(e){}})();`;

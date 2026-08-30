@@ -9,6 +9,7 @@ import {
 } from "@/components/desk/PaperBookModal";
 import { Sparkline } from "@/components/desk/Sparkline";
 import { TradingViewModal } from "@/components/desk/TradingViewModal";
+import { OnboardingModal } from "@/components/desk/OnboardingModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import {
   BusyBanner,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/Feedback";
 import { Tip } from "@/components/ui/Tip";
 import { MAX_USER_WATCHLIST } from "@/lib/limits";
+import { hasCompletedOnboarding } from "@/lib/onboarding";
 
 type DeskSnapshot = {
   symbol: string;
@@ -114,6 +116,7 @@ export function DeskShell() {
     exchange: string;
   } | null>(null);
   const [paperBookOpen, setPaperBookOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -167,6 +170,12 @@ export function DeskShell() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (deedTimer.current) clearTimeout(deedTimer.current);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!hasCompletedOnboarding()) {
+      setOnboardingOpen(true);
+    }
   }, []);
 
   const refresh = useCallback(
@@ -1053,6 +1062,11 @@ export function DeskShell() {
           </div>
         </div>
       </div>
+
+      <OnboardingModal
+        open={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+      />
 
       <ConfirmModal
         open={pendingRemove != null}
