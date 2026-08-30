@@ -8,13 +8,14 @@ import { mapPool } from "@/lib/concurrency";
 import { logger } from "@/lib/logger";
 import {
   buildMarketSnapshot,
-  fetchCompanyNews,
   fetchDailyOhlc,
+  fetchHeadlinesForSymbol,
   fetchNewsSentiment,
   isPromisingBreakout,
   isSharpDip,
   MarketDataError,
 } from "@/lib/market";
+import { isCryptoPair } from "@/lib/symbols";
 import { markAlertSent, wasAlertedRecently } from "@/lib/redis";
 import type { AlertPayload, ScanResult, WatchlistEntry } from "@/types";
 
@@ -41,8 +42,8 @@ async function evaluateSymbol(
 
   const [series, sentiment, headlines] = await Promise.all([
     fetchDailyOhlc(symbol),
-    fetchNewsSentiment(symbol),
-    fetchCompanyNews(symbol, 3, 2),
+    isCryptoPair(symbol) ? Promise.resolve(null) : fetchNewsSentiment(symbol),
+    fetchHeadlinesForSymbol(symbol, 2),
   ]);
 
   if (!series.bars.length) {

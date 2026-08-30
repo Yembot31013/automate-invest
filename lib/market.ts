@@ -10,7 +10,9 @@ import { logger } from "@/lib/logger";
 import {
   defaultExchangeForSymbol,
   isCryptoPair,
+  listSupportedCryptoPairs,
   resolveSymbolInput,
+  cryptoNewsNeedles,
 } from "@/lib/symbols";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
@@ -249,7 +251,13 @@ export async function fetchAlpacaCryptoBars(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
 ): Promise<CandleSeries> {
-  const pair = resolveSymbolInput(symbol, "CRYPTO").symbol;
+  const resolved = resolveSymbolInput(symbol, "CRYPTO");
+  if (resolved.unsupportedCrypto || !isCryptoPair(resolved.symbol)) {
+    throw new MarketDataError(
+      `Unsupported crypto ${resolved.symbol || symbol}. Supported pairs: ${listSupportedCryptoPairs().join(", ")}`,
+    );
+  }
+  const pair = resolved.symbol;
   const cacheKey = `cache:ohlc:crypto:${pair}:${lookbackDays}`;
   const cached = await cacheGet<CandleSeries>(cacheKey);
   if (cached?.bars?.length) {
@@ -320,32 +328,40 @@ export async function fetchDailyOhlc(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
 ): Promise<CandleSeries> {
-  if (isCryptoPair(symbol) || resolveSymbolInput(symbol).assetClass === "crypto") {
+  const resolved = resolveSymbolInput(symbol);
+  if (resolved.unsupportedCrypto) {
+    throw new MarketDataError(
+      `Unsupported crypto ${resolved.symbol}. Supported pairs: ${listSupportedCryptoPairs().join(", ")}`,
+    );
+  }
+
+  if (isCryptoPair(resolved.symbol) || resolved.assetClass === "crypto") {
     if (!hasAlpacaCredentials()) {
       throw new MarketDataError(
         "Crypto spot needs ALPACA_API_KEY/SECRET configured",
       );
     }
-    return fetchAlpacaCryptoBars(symbol, lookbackDays);
+    return fetchAlpacaCryptoBars(resolved.symbol, lookbackDays);
   }
 
+  const equitySymbol = resolved.symbol;
   const hasFinnhub = Boolean(process.env.FINNHUB_API_KEY?.trim());
   const hasAlpaca = hasAlpacaCredentials();
 
   if (hasAlpaca) {
     try {
-      return await fetchAlpacaDailyBars(symbol, lookbackDays);
+      return await fetchAlpacaDailyBars(equitySymbol, lookbackDays);
     } catch (error) {
       if (!hasFinnhub) throw error;
       logger.warn("market", "Alpaca OHLC failed; trying Finnhub candles", {
-        symbol,
+        symbol: equitySymbol,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   if (hasFinnhub) {
-    return fetchFinnhubDailyCandles(symbol, lookbackDays);
+    return fetchFinnhubDailyCandles(equitySymbol, lookbackDays);
   }
 
   throw new MarketDataError(
@@ -361,6 +377,11 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
   const resolved = resolveSymbolInput(symbol);
   if (!resolved.symbol) {
     throw new MarketDataError("Symbol is required");
+  }
+  if (resolved.unsupportedCrypto) {
+    throw new MarketDataError(
+      `Unsupported crypto ${resolved.symbol}. Supported pairs: ${listSupportedCryptoPairs().join(", ")} — symbol was not added.`,
+    );
   }
 
   try {
@@ -393,7 +414,12 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
   }
 }
 
-export { defaultExchangeForSymbol, isCryptoPair, resolveSymbolInput };
+export {
+  defaultExchangeForSymbol,
+  isCryptoPair,
+  listSupportedCryptoPairs,
+  resolveSymbolInput,
+};
 
 interface FinnhubSentimentResponse {
   symbol?: string;
@@ -536,6 +562,122 @@ export async function fetchCompanyNews(
     });
     return [];
   }
+}
+
+/**
+ * Crypto headlines via Finnhub market news (category=crypto), filtered to the coin.
+ * Isolated from /company-news so equity paths stay untouched.
+ */
+export async function fetchCryptoMarketNews(
+  symbol: string,
+  limit = 3,
+): Promise<CompanyNewsItem[]> {
+  const token = process.env.FINNHUB_API_KEY?.trim();
+  if (!token) {
+    return [];
+  }
+
+  const resolved = resolveSymbolInput(symbol, "CRYPTO");
+  if (resolved.unsupportedCrypto || !isCryptoPair(resolved.symbol)) {
+    return [];
+  }
+  const pair = resolved.symbol;
+  const needles = cryptoNewsNeedles(pair);
+  const cacheKey = `cache:news:crypto:${pair}:${limit}`;
+  const cached = await cacheGet<CompanyNewsItem[]>(cacheKey);
+  if (cached) {
+    return cached.slice(0, limit);
+  }
+
+  try {
+    await acquireFinnhubSlot();
+    const url = new URL(`${FINNHUB_BASE}/news`);
+    url.searchParams.set("category", "crypto");
+    url.searchParams.set("token", token);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      logger.warn("market", "crypto market news failed", {
+        symbol: pair,
+        status: response.status,
+      });
+      return [];
+    }
+
+    const payload = (await response.json()) as FinnhubCompanyNewsItem[];
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+
+    const matches = (text: string) => {
+      const hay = text.toLowerCase();
+      return needles.some((n) => {
+        if (n.length <= 3) {
+          const re = new RegExp(
+            `(^|[^a-z0-9])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`,
+            "i",
+          );
+          return re.test(hay);
+        }
+        return hay.includes(n);
+      });
+    };
+
+    const filtered = payload
+      .filter((item) => item.headline)
+      .filter(
+        (item) =>
+          matches(item.headline ?? "") || matches(item.summary ?? ""),
+      )
+      .map((item) => ({
+        headline: item.headline ?? "",
+        summary: item.summary ?? "",
+        source: item.source ?? "",
+        url: item.url ?? "",
+        datetime: item.datetime ?? 0,
+      }));
+
+    // Prefer coin hits; if none match, fall back to a few general crypto headlines
+    // so the tape does not look "broken" vs equities.
+    const items =
+      filtered.length > 0
+        ? filtered.slice(0, Math.max(limit, 10))
+        : payload
+            .filter((item) => item.headline)
+            .slice(0, Math.max(limit, 10))
+            .map((item) => ({
+              headline: item.headline ?? "",
+              summary: item.summary ?? "",
+              source: item.source ?? "",
+              url: item.url ?? "",
+              datetime: item.datetime ?? 0,
+            }));
+
+    await cacheSet(cacheKey, items, NEWS_CACHE_TTL);
+    return items.slice(0, limit);
+  } catch (error) {
+    logger.error("market", "crypto market news error", {
+      symbol: pair,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+/** Equity → company-news; crypto → category=crypto feed (never mixes the two paths). */
+export async function fetchHeadlinesForSymbol(
+  symbol: string,
+  limit = 3,
+): Promise<CompanyNewsItem[]> {
+  if (isCryptoPair(symbol) || resolveSymbolInput(symbol).assetClass === "crypto") {
+    return fetchCryptoMarketNews(symbol, limit);
+  }
+  return fetchCompanyNews(symbol, 3, limit);
 }
 
 export function buildMarketSnapshot(

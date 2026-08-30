@@ -81,7 +81,7 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. Accepts equities and crypto aliases (bitcoin→BTC/USD). Always call when the user asks to monitor — even if an older chat turn said it was added. Returns alreadyWatched / assetClass.",
+        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended; crypto is allowlist-only (BTC/USD, ETH/USD, …). Always call when the user asks to monitor. Returns alreadyWatched / assetClass.",
       inputSchema: z.object({
         symbol: z
           .string()

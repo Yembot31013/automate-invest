@@ -5,8 +5,10 @@ import {
   defaultExchangeForSymbol,
   findWatchlistSymbol,
   isCryptoPair,
+  listSupportedCryptoPairs,
   resolveSymbolInput,
   symbolsMatch,
+  cryptoNewsNeedles,
 } from "../symbols.ts";
 
 describe("resolveSymbolInput", () => {
@@ -49,5 +51,28 @@ describe("crypto helpers", () => {
     assert.equal(findWatchlistSymbol(list, "bitcoin"), "BTC/USD");
     assert.equal(findWatchlistSymbol(list, "AAPL"), "AAPL");
     assert.equal(findWatchlistSymbol(list, "NVDA"), undefined);
+  });
+
+  it("builds crypto news needles for ETH", () => {
+    const needles = cryptoNewsNeedles("ETH/USD");
+    assert.ok(needles.includes("ethereum"));
+    assert.ok(needles.includes("eth"));
+  });
+
+  it("rejects crypto outside the allowlist", () => {
+    const pepe = resolveSymbolInput("PEPE/USD");
+    assert.equal(pepe.unsupportedCrypto, true);
+    assert.equal(pepe.assetClass, "crypto");
+    assert.equal(isCryptoPair("PEPE/USD"), false);
+
+    const random = resolveSymbolInput("randomcoin", "CRYPTO");
+    assert.equal(random.unsupportedCrypto, true);
+  });
+
+  it("lists supported crypto pairs", () => {
+    const pairs = listSupportedCryptoPairs();
+    assert.ok(pairs.includes("BTC/USD"));
+    assert.ok(pairs.includes("ETH/USD"));
+    assert.ok(!pairs.includes("PEPE/USD"));
   });
 });

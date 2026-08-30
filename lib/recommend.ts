@@ -2,12 +2,13 @@ import { mapPool } from "@/lib/concurrency";
 import { logger } from "@/lib/logger";
 import {
   buildMarketSnapshot,
-  fetchCompanyNews,
   fetchDailyOhlc,
+  fetchHeadlinesForSymbol,
   fetchNewsSentiment,
   isPromisingBreakout,
   isSharpDip,
 } from "@/lib/market";
+import { isCryptoPair } from "@/lib/symbols";
 import type { Recommendation, WatchlistEntry } from "@/types";
 
 function scoreSnapshot(rec: Omit<Recommendation, "score">): number {
@@ -47,8 +48,10 @@ export async function recommendFromWatchlist(
     try {
       const [series, sentiment, headlines] = await Promise.all([
         fetchDailyOhlc(entry.symbol),
-        fetchNewsSentiment(entry.symbol),
-        fetchCompanyNews(entry.symbol, 3, 2),
+        isCryptoPair(entry.symbol)
+          ? Promise.resolve(null)
+          : fetchNewsSentiment(entry.symbol),
+        fetchHeadlinesForSymbol(entry.symbol, 2),
       ]);
       if (!series.bars.length) {
         return [] as Recommendation[];

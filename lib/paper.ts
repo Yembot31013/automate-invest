@@ -2,11 +2,11 @@ import { mapPool } from "@/lib/concurrency";
 import { logger } from "@/lib/logger";
 import {
   buildMarketSnapshot,
-  fetchCompanyNews,
   fetchDailyOhlc,
+  fetchHeadlinesForSymbol,
   fetchNewsSentiment,
 } from "@/lib/market";
-import { defaultExchangeForSymbol, isCryptoPair, resolveSymbolInput } from "@/lib/symbols";
+import { defaultExchangeForSymbol, isCryptoPair, listSupportedCryptoPairs, resolveSymbolInput } from "@/lib/symbols";
 import {
   getPaperCash,
   getPaperPositions,
@@ -67,6 +67,11 @@ export async function paperBuy(params: {
   notes?: string;
 }): Promise<PaperPositionMark & { cashRemaining: number }> {
   const resolved = resolveSymbolInput(params.symbol);
+  if (resolved.unsupportedCrypto) {
+    throw new Error(
+      `Unsupported crypto ${resolved.symbol}. Supported: ${listSupportedCryptoPairs().join(", ")}`,
+    );
+  }
   const symbol = resolved.symbol;
   if (!symbol) {
     throw new Error("Symbol is required");
@@ -204,13 +209,13 @@ export async function getPortfolioSummary(
   };
 }
 
-/** Full snapshot with sentiment + recent headlines (equities). Crypto skips Finnhub news. */
+/** Full snapshot — equities use company-news; crypto uses Finnhub crypto category. */
 export async function loadSnapshot(symbol: string, exchange = "NASDAQ") {
   const crypto = isCryptoPair(symbol);
   const [series, sentiment, headlines] = await Promise.all([
     fetchDailyOhlc(symbol),
     crypto ? Promise.resolve(null) : fetchNewsSentiment(symbol),
-    crypto ? Promise.resolve([]) : fetchCompanyNews(symbol, 3, 3),
+    fetchHeadlinesForSymbol(symbol, 3),
   ]);
   return buildMarketSnapshot(
     series,
