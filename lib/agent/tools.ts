@@ -14,6 +14,7 @@ import {
   getUserWatchlist,
   removeFromUserWatchlist,
 } from "@/lib/redis";
+import { sendCapabilityGapEmail } from "@/lib/email/resend";
 import { computeWhatIf } from "@/lib/whatif";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
@@ -57,17 +58,21 @@ export function createDeskTools(userId: string) {
     }),
 
     listWatchlist: tool({
-      description: "List symbols the user is monitoring.",
+      description:
+        "List symbols currently on the user's watchlist. Use when they ask what you're watching, or before claiming something is still monitored. Chat history is not enough.",
       inputSchema: z.object({}),
       execute: async () => {
         const watchlist = await getUserWatchlist(userId);
-        return { watchlist };
+        return {
+          watchlist,
+          symbols: watchlist.map((entry) => entry.symbol),
+        };
       },
     }),
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. For multiple tickers, call once per symbol (or prefer monitorSymbols). Do not claim success if ok is false.",
+        "Add one ticker to the user's watchlist after verifying market data. Always call when the user asks to monitor — even if an older chat turn said it was added (they may have removed it in the UI). Returns alreadyWatched if it was already present.",
       inputSchema: z.object({
         symbol: z.string(),
         exchange: z.string().optional(),
@@ -75,12 +80,21 @@ export function createDeskTools(userId: string) {
       execute: async ({ symbol, exchange }) => {
         try {
           const verified = await verifyTradableSymbol(symbol);
+          const before = await getUserWatchlist(userId);
+          const alreadyWatched = before.some(
+            (entry) => entry.symbol === verified,
+          );
           const watchlist = await addToUserWatchlist(
             userId,
             verified,
             exchange ?? "NASDAQ",
           );
-          return { ok: true, symbol: verified, watchlist };
+          return {
+            ok: true,
+            symbol: verified,
+            alreadyWatched,
+            watchlist,
+          };
         } catch (error) {
           return {
             ok: false,
@@ -96,7 +110,7 @@ export function createDeskTools(userId: string) {
 
     monitorSymbols: tool({
       description:
-        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Reports per-symbol ok/error — never claim a failed symbol was added.",
+        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Always call this when they ask to monitor — do not skip because of chat history. Reports per-symbol ok/alreadyWatched/error.",
       inputSchema: z.object({
         symbols: z
           .array(z.string())
@@ -106,21 +120,26 @@ export function createDeskTools(userId: string) {
         exchange: z.string().optional(),
       }),
       execute: async ({ symbols, exchange }) => {
+        const before = await getUserWatchlist(userId);
+        const beforeSet = new Set(before.map((entry) => entry.symbol));
         const results: Array<{
           symbol: string;
           ok: boolean;
+          alreadyWatched?: boolean;
           error?: string;
         }> = [];
 
         for (const raw of symbols) {
           try {
             const verified = await verifyTradableSymbol(raw);
+            const alreadyWatched = beforeSet.has(verified);
             await addToUserWatchlist(
               userId,
               verified,
               exchange ?? "NASDAQ",
             );
-            results.push({ symbol: verified, ok: true });
+            beforeSet.add(verified);
+            results.push({ symbol: verified, ok: true, alreadyWatched });
           } catch (error) {
             results.push({
               symbol: raw.trim().toUpperCase(),
@@ -144,13 +163,89 @@ export function createDeskTools(userId: string) {
 
     unmonitorSymbol: tool({
       description:
-        "Remove a symbol from the user's watchlist. Cron drops it only if no other user still watches it.",
+        "Remove one ticker from the user's watchlist. Call this for casual asks like 'remove it', 'take that off', 'drop BTC', 'stop watching amazon' — resolve the symbol from context/live watchlist first. Never claim removal without this tool returning removed: true.",
       inputSchema: z.object({
-        symbol: z.string(),
+        symbol: z
+          .string()
+          .describe("Ticker to remove, e.g. BTC, AMZN, GOOG"),
       }),
       execute: async ({ symbol }) => {
-        const watchlist = await removeFromUserWatchlist(userId, symbol);
-        return { ok: true, watchlist };
+        const normalized = symbol.trim().toUpperCase();
+        const before = await getUserWatchlist(userId);
+        const wasPresent = before.some((entry) => entry.symbol === normalized);
+        if (!wasPresent) {
+          return {
+            ok: true,
+            removed: false,
+            symbol: normalized,
+            wasPresent: false,
+            watchlist: before,
+            message: `${normalized} was not on the watchlist`,
+          };
+        }
+        const watchlist = await removeFromUserWatchlist(userId, normalized);
+        return {
+          ok: true,
+          removed: true,
+          symbol: normalized,
+          wasPresent: true,
+          watchlist,
+        };
+      },
+    }),
+
+    reportCapabilityGap: tool({
+      description:
+        "Email the product owner a detailed, actionable brief when the user wants something the desk cannot do yet (missing data/API, wrong asset class, plan limit, or unimplemented feature). Use when you must refuse or only partially help. Be specific about what to build.",
+      inputSchema: z.object({
+        userRequest: z
+          .string()
+          .describe("What the user asked for, in their words plus your interpretation"),
+        gapTitle: z
+          .string()
+          .describe("Short title, e.g. Spot Bitcoin monitoring (not equity BTC)"),
+        whyBlocked: z
+          .string()
+          .describe("Concrete reason we cannot fulfill this with current tools/data"),
+        whatExistsToday: z
+          .string()
+          .describe("Closest capabilities we already have"),
+        whatToBuild: z
+          .string()
+          .describe(
+            "Specific implementation steps so the AI can do this later (APIs, tools, schema, UI)",
+          ),
+        suggestedToolsApis: z
+          .string()
+          .optional()
+          .describe("Named APIs, endpoints, or packages to add"),
+        priority: z.enum(["low", "medium", "high"]).optional(),
+        conversationContext: z
+          .string()
+          .optional()
+          .describe("1–3 lines of relevant prior chat context"),
+      }),
+      execute: async (input) => {
+        const result = await sendCapabilityGapEmail({
+          userId,
+          ...input,
+        });
+        if (!result.ok) {
+          return {
+            ok: false,
+            emailed: false,
+            error: result.error,
+            message:
+              "Could not email the product owner — tell the user the limit honestly anyway.",
+          };
+        }
+        return {
+          ok: true,
+          emailed: true,
+          emailId: result.id,
+          message:
+            "Product owner was emailed a detailed capability-gap brief. Tell the user you've flagged it for the team.",
+        };
       },
     }),
 

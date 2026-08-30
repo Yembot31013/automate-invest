@@ -11,7 +11,12 @@ import { buildDeskInstructions } from "@/lib/agent/prompt";
 import { createDeskTools } from "@/lib/agent/tools";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { logger } from "@/lib/logger";
-import { getChatMessages, saveChatMessages, clearChatMessages } from "@/lib/redis";
+import {
+  clearChatMessages,
+  getChatMessages,
+  getUserWatchlist,
+  saveChatMessages,
+} from "@/lib/redis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,10 +67,13 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { messages?: UIMessage[] };
     const messages = withUniqueMessageIds(body.messages ?? []);
+    const watchlist = await getUserWatchlist(userId);
 
     const result = streamText({
       model: google("gemini-2.5-pro"),
-      instructions: buildDeskInstructions(),
+      instructions: buildDeskInstructions({
+        watchlistSymbols: watchlist.map((entry) => entry.symbol),
+      }),
       messages: await convertToModelMessages(messages),
       tools: createDeskTools(userId),
       stopWhen: isStepCount(8),

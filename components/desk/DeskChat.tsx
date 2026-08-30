@@ -76,6 +76,8 @@ function toolMutationSummary(toolName: string): string {
       return "Watchlist updated";
     case "unmonitorSymbol":
       return "Ticker removed";
+    case "reportCapabilityGap":
+      return "Flagged a capability gap";
     case "paperBuy":
       return "Paper buy filled";
     case "paperSell":
