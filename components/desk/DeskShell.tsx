@@ -239,14 +239,9 @@ export function DeskShell() {
       : "On the tape · salute ready";
 
   useEffect(() => {
-    showToast({
-      kind: "busy",
-      message: "Warming up your desk — fetching prices…",
-    });
-    void refresh({ quiet: true }).then(() => {
-      setToast((prev) => (prev?.kind === "busy" ? null : prev));
-    });
-  }, [refresh, showToast]);
+    // Quiet boot — chat/panel loaders already cover first paint (avoids toast over tabs).
+    void refresh({ quiet: true });
+  }, [refresh]);
 
   async function addSymbol(e: React.FormEvent) {
     e.preventDefault();

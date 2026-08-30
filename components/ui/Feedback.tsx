@@ -72,29 +72,31 @@ export function StatusToast({
   if (!toast || !mounted) return null;
 
   return createPortal(
-    <div
-      className={`status-toast status-toast-${toast.kind} fade-up`}
-      role="status"
-      aria-live="polite"
-    >
-      <span className="flex items-center gap-2">
-        {toast.kind === "busy" && <Spinner size="sm" label={toast.message} />}
-        {toast.kind === "ok" && <span aria-hidden>✓</span>}
-        {toast.kind === "warn" && <span aria-hidden>!</span>}
-        {toast.kind === "info" && <span aria-hidden>i</span>}
-        <span>{toast.message}</span>
-      </span>
-      {onDismiss && toast.kind !== "busy" && (
-        <button
-          type="button"
-          className="status-toast-dismiss"
-          onClick={onDismiss}
-          aria-label="Dismiss message"
-          title="Dismiss"
-        >
-          ×
-        </button>
-      )}
+    <div className="status-toast-host" role="presentation">
+      <div
+        className={`status-toast status-toast-${toast.kind} fade-up`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="flex items-center gap-2">
+          {toast.kind === "busy" && <Spinner size="sm" label={toast.message} />}
+          {toast.kind === "ok" && <span aria-hidden>✓</span>}
+          {toast.kind === "warn" && <span aria-hidden>!</span>}
+          {toast.kind === "info" && <span aria-hidden>i</span>}
+          <span>{toast.message}</span>
+        </span>
+        {onDismiss && toast.kind !== "busy" && (
+          <button
+            type="button"
+            className="status-toast-dismiss"
+            onClick={onDismiss}
+            aria-label="Dismiss message"
+            title="Dismiss"
+          >
+            ×
+          </button>
+        )}
+      </div>
     </div>,
     document.body,
   );

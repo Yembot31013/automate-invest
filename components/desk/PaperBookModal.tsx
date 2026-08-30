@@ -82,7 +82,7 @@ export function PaperBookModal({
 
   return createPortal(
     <div
-      className="modal-overlay fade-up"
+      className="modal-overlay modal-overlay-sheet fade-up"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -94,10 +94,10 @@ export function PaperBookModal({
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex shrink-0 items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="font-mono-label">Paper book</p>
-            <h3 id={titleId} className="modal-title !mt-0.5">
+            <h3 id={titleId} className="modal-title !mt-0.5 text-xl sm:text-2xl">
               Your holdings
             </h3>
           </div>
@@ -110,31 +110,37 @@ export function PaperBookModal({
           </button>
         </div>
 
-        <p className="mt-2 text-[0.75rem] leading-snug text-[var(--muted)]">
+        <p className="mt-2 shrink-0 text-[0.75rem] leading-snug text-[var(--muted)]">
           Fake $100k cash · real market prices. Equity = cash left + what open
           positions are worth. PnL = how much those positions are up or down vs
           what you paid.
         </p>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[0.7rem] sm:grid-cols-4">
+        <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 text-[0.7rem] sm:grid-cols-4">
           <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--yellow)_28%,var(--mix))] px-2.5 py-2">
             <p className="font-mono-label">Equity</p>
-            <p className="font-semibold text-[var(--ink)]">{formatUsd(equity)}</p>
+            <p className="truncate font-semibold text-[var(--ink)]">
+              {formatUsd(equity)}
+            </p>
           </div>
           <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--blue)_28%,var(--mix))] px-2.5 py-2">
             <p className="font-mono-label">Cash</p>
-            <p className="font-semibold text-[var(--ink)]">{formatUsd(cash)}</p>
+            <p className="truncate font-semibold text-[var(--ink)]">
+              {formatUsd(cash)}
+            </p>
           </div>
           <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--green)_28%,var(--mix))] px-2.5 py-2">
             <p className="font-mono-label">Positions</p>
-            <p className="font-semibold text-[var(--ink)]">
+            <p className="truncate font-semibold text-[var(--ink)]">
               {formatUsd(totalMarketValue)}
             </p>
           </div>
           <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--lavender)_32%,var(--mix))] px-2.5 py-2">
             <p className="font-mono-label">PnL</p>
             <p className="font-semibold text-[var(--ink)]">
-              {formatUsd(totalUnrealizedPnl)}{" "}
+              <span className="block truncate sm:inline">
+                {formatUsd(totalUnrealizedPnl)}
+              </span>{" "}
               <span className="text-[var(--muted)]">
                 ({formatPct(totalUnrealizedPnlPct)})
               </span>
@@ -142,11 +148,11 @@ export function PaperBookModal({
           </div>
         </div>
 
-        <p className="mt-2 text-[0.68rem] text-[var(--muted)]">
+        <p className="mt-2 shrink-0 text-[0.68rem] text-[var(--muted)]">
           Cost basis on open lots: {formatUsd(totalCost)}
         </p>
 
-        <div className="mt-3 max-h-[min(50vh,420px)] space-y-2 overflow-y-auto pr-0.5">
+        <div className="paper-book-list mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
           {openPositions.length === 0 ? (
             <EmptyHint
               title="No open positions"
@@ -163,7 +169,7 @@ export function PaperBookModal({
                     <p className="font-display text-lg font-bold tracking-tight text-[var(--ink)]">
                       {pos.symbol}
                     </p>
-                    <p className="text-[0.72rem] text-[var(--muted)]">
+                    <p className="text-[0.72rem] leading-snug text-[var(--muted)]">
                       {pos.quantity} × {formatUsd(pos.entryPrice)} entry → mark{" "}
                       {formatUsd(pos.markPrice)}
                     </p>
@@ -183,15 +189,15 @@ export function PaperBookModal({
                     </p>
                   </div>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[0.7rem] text-[var(--muted)]">
-                  <span>
+                <div className="mt-2 flex flex-col gap-2 text-[0.7rem] text-[var(--muted)] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <span className="min-w-0 leading-snug">
                     Paid {formatUsd(pos.costBasis)} · Worth{" "}
                     {formatUsd(pos.marketValue)}
                   </span>
                   {onAskSell ? (
                     <button
                       type="button"
-                      className="btn-ghost !px-2.5 !py-1 text-[0.7rem]"
+                      className="btn-ghost w-full !px-2.5 !py-1.5 text-[0.7rem] sm:w-auto"
                       onClick={() => onAskSell(pos.symbol)}
                     >
                       Sell via chat
@@ -203,7 +209,7 @@ export function PaperBookModal({
           )}
         </div>
 
-        <p className="mt-3 text-[0.68rem] text-[var(--muted)]">
+        <p className="mt-3 shrink-0 text-[0.68rem] text-[var(--muted)]">
           Esc or Close to exit · Sell fills the sidekick composer
         </p>
       </div>

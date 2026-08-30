@@ -123,12 +123,17 @@ body {
     display: none;
   }
 
+  /* Center toast in the viewport — never sit on Agents/Chat tabs */
+  .status-toast-host {
+    align-items: center;
+    padding: 1rem;
+  }
+
   .status-toast {
-    top: auto;
-    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     font-size: 0.78rem;
-    padding: 0.65rem 0.85rem;
-    max-width: calc(100vw - 1rem);
+    padding: 0.7rem 0.95rem;
+    max-width: min(320px, calc(100vw - 2rem));
+    text-align: center;
   }
 
   .desk-chat-header {
@@ -146,6 +151,44 @@ body {
   [data-theme="dark"] .desk-chat-chips {
     background: color-mix(in srgb, var(--white) 10%, var(--mix));
   }
+
+  .desk-chip-scroller {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    touch-action: pan-x;
+  }
+
+  .desk-chip-scroller::-webkit-scrollbar {
+    display: none;
+  }
+
+  .desk-chip-scroller > .tip-anchor {
+    flex: 0 0 auto;
+  }
+
+  .desk-chip-btn {
+    transform: none !important;
+  }
+
+  .desk-chip-btn:hover:not(:disabled),
+  .desk-chip-btn:active:not(:disabled) {
+    transform: none !important;
+  }
+}
+
+.desk-chip-scroller {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.desk-chip-scroller > .tip-anchor {
+  flex: 0 0 auto;
+  max-width: none;
 }
 
 .soft-card {
@@ -298,9 +341,35 @@ body {
 }
 
 .paper-book-modal {
+  display: flex;
   width: min(100%, 520px);
   max-height: min(90dvh, 720px);
-  overflow: auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.paper-book-list {
+  min-height: 0;
+}
+
+.modal-overlay-sheet {
+  place-items: center;
+}
+
+@media (max-width: 639px) {
+  .modal-overlay-sheet {
+    place-items: end stretch;
+    padding: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .paper-book-modal {
+    width: 100%;
+    max-width: none;
+    max-height: min(92dvh, 100%);
+    border-radius: 1.25rem 1.25rem 0 0;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 .onboard-modal {
@@ -1276,7 +1345,8 @@ body {
 .tip-anchor {
   position: relative;
   display: inline-flex;
-  max-width: 100%;
+  flex-shrink: 0;
+  max-width: none;
   vertical-align: top;
 }
 
@@ -1394,14 +1464,24 @@ div.tip-anchor {
   }
 }
 
-.status-toast {
+.status-toast-host {
   position: fixed;
+  inset: 0;
   z-index: 9999;
-  top: 1.1rem;
-  left: 50%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1.1rem 0.75rem 0;
+  pointer-events: none;
+}
+
+.status-toast {
+  position: relative;
+  top: auto;
+  left: auto;
   right: auto;
   bottom: auto;
-  transform: translateX(-50%);
+  transform: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
