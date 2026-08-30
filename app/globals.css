@@ -364,6 +364,83 @@ body {
   box-shadow: var(--shadow-lift);
 }
 
+.sidekick-card {
+  position: relative;
+  background: color-mix(in srgb, var(--white) 88%, var(--mix));
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.sidekick-card.is-busy {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--ink));
+}
+
+.sidekick-avatar {
+  display: inline-flex;
+  height: 2.35rem;
+  width: 2.35rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, var(--cream));
+  border: 1.5px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  font-size: 1.25rem;
+  line-height: 1;
+  box-shadow: none;
+  animation: sidekickBreathe 3.2s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+.sidekick-avatar.is-busy {
+  animation: sidekickPulse 0.85s ease-in-out infinite;
+  border-color: color-mix(in srgb, var(--yellow) 55%, var(--ink));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 22%, transparent);
+}
+
+[data-theme="dark"] .sidekick-card {
+  background: color-mix(in srgb, var(--mix) 82%, var(--white));
+  border-color: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+[data-theme="dark"] .sidekick-avatar {
+  background: color-mix(in srgb, var(--mix) 55%, #1a1c22);
+  border-color: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.sidekick-subtext {
+  display: block;
+  margin-top: 0.1rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 13.5rem;
+}
+
+@keyframes sidekickBreathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.04);
+  }
+}
+
+@keyframes sidekickPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
 .fade-up {
   animation: fadeUp 0.45s ease both;
 }
@@ -1119,7 +1196,8 @@ button:not(:disabled),
   .fade-up,
   .metric-tile,
   .pressable,
-  .badge-pill {
+  .badge-pill,
+  .sidekick-avatar {
     animation: none !important;
     transition: none !important;
   }
@@ -1133,7 +1211,9 @@ button:not(:disabled),
   .tilt-hover:hover,
   .btn-primary:hover:not(:disabled),
   .metric-tile:hover,
-  .pressable:hover:not(:disabled) {
+  .pressable:hover:not(:disabled),
+  .sidekick-avatar.is-busy {
     transform: none;
+    box-shadow: none;
   }
 }

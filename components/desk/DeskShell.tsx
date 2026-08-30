@@ -75,6 +75,23 @@ function formatPct(value: number): string {
   return `${prefix}${value.toFixed(2)}%`;
 }
 
+function sidekickDeedLine(summary: string): string {
+  switch (summary) {
+    case "Watchlist updated":
+      return "List updated · still loyal";
+    case "Ticker removed":
+      return "Dropped one · eyes forward";
+    case "Paper buy filled":
+      return "Paper buy · salute";
+    case "Paper sell filled":
+      return "Paper sell · salute";
+    case "Flagged a capability gap":
+      return "Flagged a gap · on it";
+    default:
+      return summary;
+  }
+}
+
 export function DeskShell() {
   const [snapshots, setSnapshots] = useState<DeskSnapshot[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioPayload | null>(null);
@@ -97,7 +114,12 @@ export function DeskShell() {
   );
   const [externalPrompt, setExternalPrompt] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<string[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [sidekickSyncing, setSidekickSyncing] = useState(false);
+  const [sidekickDeed, setSidekickDeed] = useState<string | null>(null);
+  const [composerFocusKey, setComposerFocusKey] = useState(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((next: NonNullable<ToastState>) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -107,8 +129,15 @@ export function DeskShell() {
     }
   }, []);
 
+  const rememberSidekickDeed = useCallback((deed: string) => {
+    if (deedTimer.current) clearTimeout(deedTimer.current);
+    setSidekickDeed(deed);
+    deedTimer.current = setTimeout(() => setSidekickDeed(null), 8000);
+  }, []);
+
   const handleChatBusy = useCallback(
     (busy: boolean) => {
+      setChatBusy(busy);
       if (busy) {
         showToast({
           kind: "busy",
@@ -128,6 +157,7 @@ export function DeskShell() {
   useEffect(() => {
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (deedTimer.current) clearTimeout(deedTimer.current);
     };
   }, []);
 
@@ -166,12 +196,14 @@ export function DeskShell() {
 
   const syncDeskFromSidekick = useCallback(
     async (reason: string) => {
+      setSidekickSyncing(true);
       showToast({
         kind: "busy",
         message: reason,
       });
       setRefreshing(true);
       await refresh({ quiet: true });
+      setSidekickSyncing(false);
       showToast({
         kind: "ok",
         message: "Desk updated from the sidekick.",
@@ -179,6 +211,15 @@ export function DeskShell() {
     },
     [refresh, showToast],
   );
+
+  const sidekickBusy = chatBusy || sidekickSyncing;
+  const sidekickSubtext = sidekickBusy
+    ? chatBusy
+      ? "Poking the market… salute locked"
+      : "Syncing your desk… hang tight"
+    : sidekickDeed
+      ? sidekickDeed
+      : "On the tape · salute ready";
 
   useEffect(() => {
     showToast({
@@ -325,28 +366,31 @@ export function DeskShell() {
 
       <div className="space-y-2 overflow-y-auto px-3 py-3">
         <Tip
-          label="Open the main chat — your market sidekick lives here"
+          label="Jump to chat with your loyal market pal"
           className="w-full"
           as="div"
         >
           <button
             type="button"
-            className="tilt-hover soft-card flex w-full items-center gap-3 px-3 py-3 text-left"
-            style={{
-              background: "color-mix(in srgb, var(--yellow) 28%, var(--mix))",
+            className={`sidekick-card tilt-hover soft-card flex w-full items-center gap-3 px-3 py-3 text-left ${
+              sidekickBusy ? "is-busy" : ""
+            }`}
+            onClick={() => {
+              setMobilePanel("chat");
+              setComposerFocusKey((n) => n + 1);
             }}
-            onClick={() => setMobilePanel("chat")}
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--yellow)] text-sm font-extrabold">
-              SD
+            <span
+              className={`sidekick-avatar ${sidekickBusy ? "is-busy" : ""}`}
+              aria-hidden
+            >
+              🫡
             </span>
-            <span>
+            <span className="min-w-0">
               <span className="block text-sm font-bold text-[var(--ink)]">
                 Sidekick
               </span>
-              <span className="font-mono-label !normal-case !tracking-normal">
-                Active chat
-              </span>
+              <span className="sidekick-subtext">{sidekickSubtext}</span>
             </span>
           </button>
         </Tip>
@@ -925,6 +969,7 @@ export function DeskShell() {
             <DeskChat
               externalPrompt={externalPrompt}
               onExternalPromptConsumed={() => setExternalPrompt(null)}
+              focusSignal={composerFocusKey}
               onPrompt={(text) =>
                 setActivityLog((prev) =>
                   [`Chat · ${text.slice(0, 48)}`, ...prev].slice(0, 12),
@@ -932,6 +977,7 @@ export function DeskShell() {
               }
               onBusyChange={handleChatBusy}
               onDeskMutated={(summary) => {
+                rememberSidekickDeed(sidekickDeedLine(summary));
                 setActivityLog((prev) =>
                   [summary, ...prev].slice(0, 12),
                 );

@@ -49,6 +49,8 @@ type DeskChatProps = {
   onBusyChange?: (busy: boolean) => void;
   /** Fired when chat tools mutate watchlist / paper book so the desk can refresh. */
   onDeskMutated?: (summary: string) => void;
+  /** Bump to focus the composer (e.g. Sidekick card click). */
+  focusSignal?: number;
 };
 
 const DESK_MUTATING_TOOLS = new Set([
@@ -93,6 +95,7 @@ export function DeskChat({
   onExternalPromptConsumed,
   onBusyChange,
   onDeskMutated,
+  focusSignal,
 }: DeskChatProps) {
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -164,6 +167,7 @@ export function DeskChat({
       onExternalPromptConsumed={onExternalPromptConsumed}
       onBusyChange={onBusyChange}
       onDeskMutated={onDeskMutated}
+      focusSignal={focusSignal}
     />
   );
 }
@@ -208,6 +212,7 @@ function DeskChatSession({
   onExternalPromptConsumed,
   onBusyChange,
   onDeskMutated,
+  focusSignal,
 }: {
   transport: DefaultChatTransport<UIMessage>;
   initialMessages: UIMessage[];
@@ -217,6 +222,7 @@ function DeskChatSession({
   onExternalPromptConsumed?: () => void;
   onBusyChange?: (busy: boolean) => void;
   onDeskMutated?: (summary: string) => void;
+  focusSignal?: number;
 }) {
   const { messages, sendMessage, setMessages, status, error } = useChat({
     transport,
@@ -305,6 +311,11 @@ function DeskChatSession({
     requestFillDraft(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot external draft fill
   }, [externalPrompt]);
+
+  useEffect(() => {
+    if (!focusSignal) return;
+    focusComposer();
+  }, [focusSignal]);
 
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
