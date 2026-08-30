@@ -539,44 +539,113 @@ export async function fetchNgxCompanyNews(
 }
 
 type ForexPayload = {
+  target?: string;
+  date?: string;
   rates?: Array<{
     currency?: string;
     rate?: number;
     inverse_rate?: number | null;
+    daily_change?: number | null;
+    daily_change_percent?: number | null;
+    last_updated?: string;
   }>;
 };
+
+export type NgxForexQuote = {
+  /** Foreign currency code, e.g. USD */
+  currency: string;
+  /** NGN per 1 unit of foreign currency (e.g. 1603.5 means $1 = ₦1603.5) */
+  ngnPerUnit: number;
+  /** Foreign units per 1 NGN */
+  unitPerNgn: number;
+  asOf: string | null;
+  dailyChangePercent: number | null;
+};
+
+/** Live NGN cross vs a foreign currency (Free plan). Default USD. */
+export async function fetchNgxForexQuote(
+  currency = "USD",
+): Promise<NgxForexQuote> {
+  const code = currency.trim().toUpperCase() || "USD";
+  const cacheKey = `cache:ngn:forex:quote:${code}`;
+  const cached = await cacheGet<NgxForexQuote>(cacheKey);
+  if (cached != null && cached.ngnPerUnit > 0) return cached;
+
+  const payload = await ngnFetch<ForexPayload>("/forex/current");
+  const row = payload.rates?.find((r) => r.currency?.toUpperCase() === code);
+  if (!row) {
+    const available =
+      payload.rates
+        ?.map((r) => r.currency?.toUpperCase())
+        .filter(Boolean)
+        .slice(0, 12)
+        .join(", ") || "none";
+    throw new NgnMarketError(
+      `No NGN rate for ${code}. Available: ${available}`,
+      404,
+      "NOT_FOUND",
+    );
+  }
+
+  let ngnPerUnit = 0;
+  let unitPerNgn = 0;
+  if (row.rate != null && row.rate > 0) {
+    ngnPerUnit = row.rate;
+    unitPerNgn =
+      row.inverse_rate != null && row.inverse_rate > 0
+        ? row.inverse_rate
+        : 1 / row.rate;
+  } else if (row.inverse_rate != null && row.inverse_rate > 0) {
+    unitPerNgn = row.inverse_rate;
+    ngnPerUnit = 1 / row.inverse_rate;
+  }
+
+  if (!(ngnPerUnit > 0) || !(unitPerNgn > 0)) {
+    throw new NgnMarketError(`Invalid NGN/${code} rate`);
+  }
+
+  const quote: NgxForexQuote = {
+    currency: code,
+    ngnPerUnit,
+    unitPerNgn,
+    asOf: row.last_updated ?? payload.date ?? null,
+    dailyChangePercent:
+      row.daily_change_percent != null && Number.isFinite(row.daily_change_percent)
+        ? row.daily_change_percent
+        : null,
+  };
+  await cacheSet(cacheKey, quote, FOREX_CACHE_TTL);
+  return quote;
+}
 
 /**
  * USD per 1 NGN (inverse of NGN-per-USD).
  * Used so paper book can keep a single USD cash ledger.
  */
 export async function fetchUsdPerNgn(): Promise<number> {
-  const cacheKey = "cache:ngn:forex:usd-per-ngn";
-  const cached = await cacheGet<number>(cacheKey);
-  if (cached != null && cached > 0) return cached;
-
-  const payload = await ngnFetch<ForexPayload>("/forex/current");
-  const usd = payload.rates?.find((r) => r.currency?.toUpperCase() === "USD");
-  if (!usd) {
-    throw new NgnMarketError("USD/NGN rate missing from forex response");
-  }
-
-  let usdPerNgn = 0;
-  if (usd.inverse_rate != null && usd.inverse_rate > 0) {
-    usdPerNgn = usd.inverse_rate;
-  } else if (usd.rate != null && usd.rate > 0) {
-    usdPerNgn = 1 / usd.rate;
-  }
-
-  if (!(usdPerNgn > 0)) {
-    throw new NgnMarketError("Invalid USD/NGN rate");
-  }
-
-  await cacheSet(cacheKey, usdPerNgn, FOREX_CACHE_TTL);
-  return usdPerNgn;
+  const quote = await fetchNgxForexQuote("USD");
+  return quote.unitPerNgn;
 }
 
 export async function convertNgnToUsd(amountNgn: number): Promise<number> {
   const rate = await fetchUsdPerNgn();
   return amountNgn * rate;
+}
+
+/** Convert an NGN amount into a foreign currency (default USD). */
+export async function convertNgnToForeign(
+  amountNgn: number,
+  currency = "USD",
+): Promise<{ amount: number; quote: NgxForexQuote }> {
+  const quote = await fetchNgxForexQuote(currency);
+  return { amount: amountNgn * quote.unitPerNgn, quote };
+}
+
+/** Convert a foreign amount into NGN (default USD). */
+export async function convertForeignToNgn(
+  amountForeign: number,
+  currency = "USD",
+): Promise<{ amountNgn: number; quote: NgxForexQuote }> {
+  const quote = await fetchNgxForexQuote(currency);
+  return { amountNgn: amountForeign * quote.ngnPerUnit, quote };
 }

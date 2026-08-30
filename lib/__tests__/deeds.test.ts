@@ -34,4 +34,15 @@ describe("deskDeedForTool", () => {
     assert.match(deed.label, /Paper buy/i);
     assert.match(deed.hint, /paperBuy/);
   });
+
+  it("maps forex lookup deeds", () => {
+    const deed = deskDeedForTool({
+      toolName: "lookupForex",
+      state: "output-available",
+      input: { currency: "USD", amountNgn: 1034 },
+    });
+    assert.equal(deed.phase, "done");
+    assert.match(deed.label, /FX/i);
+    assert.doesNotMatch(deed.label, /lookupForex/);
+  });
 });

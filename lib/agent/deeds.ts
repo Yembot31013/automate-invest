@@ -97,6 +97,11 @@ const DEED_COPY: Record<string, DeedCopy> = {
     done: "Gap flagged for the team",
     error: "Couldn't send the gap note",
   },
+  lookupForex: {
+    running: "Checking the FX board…",
+    done: "FX rate ready",
+    error: "Couldn't read the FX rate",
+  },
 };
 
 function withSymbol(base: string, symbol: string | null): string {

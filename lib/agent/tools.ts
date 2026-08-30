@@ -3,6 +3,13 @@ import { z } from "zod";
 
 import { verifyTradableSymbolDetailed } from "@/lib/market";
 import {
+  convertForeignToNgn,
+  convertNgnToForeign,
+  fetchNgxForexQuote,
+  hasNgnMarketCredentials,
+  NgnMarketError,
+} from "@/lib/ngnmarket";
+import {
   getPortfolioSummary,
   loadSnapshot,
   paperBuy,
@@ -48,13 +55,13 @@ export function createDeskTools(userId: string) {
   return {
     getSnapshot: tool({
       description:
-        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). After calling, explain headlines in plain English — do not only list titles.",
+        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). After calling, explain headlines in plain English — do not only list titles. For NGX naira→dollar value questions, also call lookupForex.",
       inputSchema: z.object({
-        symbol: z.string().describe("Ticker symbol, e.g. NVDA"),
+        symbol: z.string().describe("Ticker symbol, e.g. NVDA or DANGCEM"),
         exchange: z
           .string()
           .optional()
-          .describe("Exchange label, default NASDAQ"),
+          .describe("Exchange label, default NASDAQ (use NGX for Nigerian names)"),
       }),
       execute: async ({ symbol, exchange }) => {
         const resolved = resolveSymbolInput(symbol, exchange);
@@ -63,6 +70,76 @@ export function createDeskTools(userId: string) {
           exchange ?? resolved.exchange,
         );
         return slimSnapshot(snapshot);
+      },
+    }),
+
+    lookupForex: tool({
+      description:
+        "Live NGN Market forex (Free plan). Use for USD/NGN and other NGN crosses, and to convert NGX naira prices or notionals into dollars (or the reverse). Call this whenever the user asks dollar value of an NGX quote, naira per dollar, or FX conversion — do not invent rates and do not reportCapabilityGap for this.",
+      inputSchema: z.object({
+        currency: z
+          .string()
+          .optional()
+          .describe("Foreign currency vs NGN, default USD (also EUR, GBP, …)"),
+        amountNgn: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Naira amount to convert into the foreign currency"),
+        amountForeign: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Foreign amount to convert into naira"),
+      }),
+      execute: async ({ currency, amountNgn, amountForeign }) => {
+        if (!hasNgnMarketCredentials()) {
+          return {
+            ok: false,
+            error:
+              "NGNMARKET_API_KEY is not configured — cannot look up live NGN forex.",
+          };
+        }
+        try {
+          const code = currency?.trim().toUpperCase() || "USD";
+          const quote = await fetchNgxForexQuote(code);
+          const result: Record<string, unknown> = {
+            ok: true,
+            currency: quote.currency,
+            pair: `${quote.currency}/NGN`,
+            ngnPerUnit: Number(quote.ngnPerUnit.toFixed(4)),
+            unitPerNgn: Number(quote.unitPerNgn.toFixed(8)),
+            asOf: quote.asOf,
+            dailyChangePercent: quote.dailyChangePercent,
+            note:
+              `₦${quote.ngnPerUnit.toFixed(2)} per 1 ${quote.currency}; ` +
+              `1 NGN ≈ ${quote.unitPerNgn.toFixed(6)} ${quote.currency}. ` +
+              "Same rate family used when paper-trading NGX names into the USD paper book.",
+          };
+
+          if (amountNgn != null) {
+            const converted = await convertNgnToForeign(amountNgn, code);
+            result.amountNgn = amountNgn;
+            result.convertedForeign = Number(converted.amount.toFixed(6));
+            result.convertedLabel = `${amountNgn} NGN ≈ ${converted.amount.toFixed(4)} ${code}`;
+          }
+          if (amountForeign != null) {
+            const converted = await convertForeignToNgn(amountForeign, code);
+            result.amountForeign = amountForeign;
+            result.convertedNgn = Number(converted.amountNgn.toFixed(2));
+            result.convertedLabelNgn = `${amountForeign} ${code} ≈ ₦${converted.amountNgn.toFixed(2)}`;
+          }
+
+          return result;
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof NgnMarketError || error instanceof Error
+                ? error.message
+                : "Forex lookup failed",
+          };
+        }
       },
     }),
 
