@@ -18,9 +18,21 @@ import { withUniqueMessageIds } from "@/lib/agent/messages";
 export const CHAT_CHIPS = [
   {
     label: "Recommend",
-    text: "What should I look at right now? Recommend from my watchlist.",
+    text: "What should I look at right now? Recommend from my watchlist — and tell me how to paper-buy or sell if I want to try it.",
     tint: "var(--lavender)",
-    hint: "Rank your watchlist for dips & breakouts — no made-up tickers",
+    hint: "Rank your watchlist, then hint how to paper-buy or sell",
+  },
+  {
+    label: "Paper buy",
+    text: "Paper buy 5 shares of NVDA at the current mark using my paper cash.",
+    tint: "var(--yellow)",
+    hint: "Fake $100k cash · real prices · fills Paper book",
+  },
+  {
+    label: "Paper sell",
+    text: "Sell / close my open paper position in NVDA and return the cash to my paper book.",
+    tint: "var(--pink)",
+    hint: "Close an open paper long · proceeds go back to cash",
   },
   {
     label: "Portfolio",
@@ -37,7 +49,7 @@ export const CHAT_CHIPS = [
   {
     label: "What-if AAPL",
     text: "What if we bought 10 shares of AAPL 30 days ago?",
-    tint: "var(--pink)",
+    tint: "var(--orange)",
     hint: "Counterfactual: buy 10 AAPL 30 days ago",
   },
 ] as const;
@@ -506,7 +518,7 @@ function DeskChatSession({
         {messages.length === 0 && !busy && (
           <EmptyHint
             title="You're in charge"
-            body='Try “monitor TSLA”, “update on SPY”, or tap a colorful chip above. Hover anything to see what it does.'
+            body='Try “monitor TSLA”, “buy 5 NVDA”, “sell NVDA”, or tap a chip (Recommend / Paper buy / Paper sell).'
           >
             <p className="mt-2 text-[0.7rem] text-[var(--muted)]">
               Tip: Ctrl/⌘+Enter sends · chips fill the box — edit, then send

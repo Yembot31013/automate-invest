@@ -7,9 +7,15 @@ import type {
 } from "@/types";
 import { acquireFinnhubSlot, cacheGet, cacheSet } from "@/lib/cache";
 import { logger } from "@/lib/logger";
+import {
+  defaultExchangeForSymbol,
+  isCryptoPair,
+  resolveSymbolInput,
+} from "@/lib/symbols";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const ALPACA_DATA_BASE = "https://data.alpaca.markets/v2";
+const ALPACA_CRYPTO_BARS = "https://data.alpaca.markets/v1beta3/crypto/us/bars";
 
 const DEFAULT_LOOKBACK_DAYS = 40;
 const SMA_PERIOD = 14;
@@ -224,6 +230,81 @@ export async function fetchAlpacaDailyBars(
   return { symbol: symbol.toUpperCase(), bars };
 }
 
+interface AlpacaCryptoBarsResponse {
+  bars?: Record<
+    string,
+    Array<{
+      t: string;
+      o: number;
+      h: number;
+      l: number;
+      c: number;
+      v: number;
+    }>
+  >;
+}
+
+/** Spot crypto daily bars via Alpaca (e.g. BTC/USD) — free with normal API keys. */
+export async function fetchAlpacaCryptoBars(
+  symbol: string,
+  lookbackDays = DEFAULT_LOOKBACK_DAYS,
+): Promise<CandleSeries> {
+  const pair = resolveSymbolInput(symbol, "CRYPTO").symbol;
+  const cacheKey = `cache:ohlc:crypto:${pair}:${lookbackDays}`;
+  const cached = await cacheGet<CandleSeries>(cacheKey);
+  if (cached?.bars?.length) {
+    return cached;
+  }
+
+  const key = requireEnv("ALPACA_API_KEY");
+  const secret = requireEnv("ALPACA_API_SECRET");
+
+  const start = new Date();
+  start.setUTCDate(start.getUTCDate() - lookbackDays);
+
+  const url = new URL(ALPACA_CRYPTO_BARS);
+  url.searchParams.set("symbols", pair);
+  url.searchParams.set("timeframe", "1Day");
+  url.searchParams.set("start", start.toISOString());
+  url.searchParams.set("limit", "100");
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "APCA-API-KEY-ID": key,
+      "APCA-API-SECRET-KEY": secret,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new MarketDataError(
+      `Alpaca crypto bars failed for ${pair}: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload = (await response.json()) as AlpacaCryptoBarsResponse;
+  const rawBars = payload.bars?.[pair] ?? payload.bars?.[pair.toUpperCase()] ?? [];
+
+  if (rawBars.length === 0) {
+    throw new MarketDataError(`No Alpaca crypto bar data for ${pair}`);
+  }
+
+  const bars: OhlcBar[] = rawBars.map((bar) => ({
+    timestamp: Math.floor(new Date(bar.t).getTime() / 1000),
+    open: bar.o,
+    high: bar.h,
+    low: bar.l,
+    close: bar.c,
+    volume: bar.v,
+  }));
+
+  const series = { symbol: pair, bars };
+  await cacheSet(cacheKey, series, OHLC_CACHE_TTL);
+  return series;
+}
+
 function hasAlpacaCredentials(): boolean {
   return Boolean(
     process.env.ALPACA_API_KEY?.trim() &&
@@ -233,13 +314,21 @@ function hasAlpacaCredentials(): boolean {
 
 /**
  * Daily OHLC for desk math (SMA, volume ratio, dip %).
- * Prefer Alpaca when configured — Finnhub free tier often 403s `/stock/candle`.
- * Finnhub is still used for company headlines (separate path).
+ * Crypto pairs use Alpaca spot; equities prefer Alpaca then Finnhub candles.
  */
 export async function fetchDailyOhlc(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
 ): Promise<CandleSeries> {
+  if (isCryptoPair(symbol) || resolveSymbolInput(symbol).assetClass === "crypto") {
+    if (!hasAlpacaCredentials()) {
+      throw new MarketDataError(
+        "Crypto spot needs ALPACA_API_KEY/SECRET configured",
+      );
+    }
+    return fetchAlpacaCryptoBars(symbol, lookbackDays);
+  }
+
   const hasFinnhub = Boolean(process.env.FINNHUB_API_KEY?.trim());
   const hasAlpaca = hasAlpacaCredentials();
 
@@ -266,28 +355,28 @@ export async function fetchDailyOhlc(
 
 /**
  * Confirm a ticker resolves with the same OHLC path the desk uses.
- * Throws MarketDataError — caller must not persist the symbol.
+ * Returns the canonical symbol (e.g. BTC/USD for bitcoin). Throws MarketDataError.
  */
 export async function verifyTradableSymbol(symbol: string): Promise<string> {
-  const normalized = symbol.trim().toUpperCase();
-  if (!normalized) {
+  const resolved = resolveSymbolInput(symbol);
+  if (!resolved.symbol) {
     throw new MarketDataError("Symbol is required");
   }
 
   try {
-    const series = await fetchDailyOhlc(normalized, 15);
+    const series = await fetchDailyOhlc(resolved.symbol, 15);
     if (!series.bars.length) {
       throw new MarketDataError(
-        `No market history for ${normalized} — check the ticker and try again`,
+        `No market history for ${resolved.symbol} — check the ticker and try again`,
       );
     }
-    return normalized;
+    return series.symbol || resolved.symbol;
   } catch (error) {
     if (error instanceof MarketDataError) {
       const msg = error.message;
       if (/\b403\b/.test(msg) || /forbidden/i.test(msg)) {
         throw new MarketDataError(
-          `Market data blocked for ${normalized} (forbidden). Symbol was not added.`,
+          `Market data blocked for ${resolved.symbol} (forbidden). Symbol was not added.`,
         );
       }
       throw new MarketDataError(
@@ -297,12 +386,14 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
       );
     }
     throw new MarketDataError(
-      `Could not verify ${normalized} — symbol was not added. ${
+      `Could not verify ${resolved.symbol} — symbol was not added. ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
 }
+
+export { defaultExchangeForSymbol, isCryptoPair, resolveSymbolInput };
 
 interface FinnhubSentimentResponse {
   symbol?: string;

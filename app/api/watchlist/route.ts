@@ -7,6 +7,11 @@ import {
   getUserWatchlist,
   removeFromUserWatchlist,
 } from "@/lib/redis";
+import {
+  defaultExchangeForSymbol,
+  findWatchlistSymbol,
+  resolveSymbolInput,
+} from "@/lib/symbols";
 import type { WatchlistMutationBody } from "@/types";
 
 export const runtime = "nodejs";
@@ -64,9 +69,9 @@ export async function POST(request: Request) {
     const watchlist = await addToUserWatchlist(
       userId,
       symbol,
-      body.exchange ?? "NASDAQ",
+      body.exchange ?? defaultExchangeForSymbol(symbol),
     );
-    return NextResponse.json({ ok: true, watchlist }, { status: 201 });
+    return NextResponse.json({ ok: true, symbol, watchlist }, { status: 201 });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to add symbol";
@@ -105,8 +110,13 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const watchlist = await removeFromUserWatchlist(userId, symbol);
-    return NextResponse.json({ ok: true, watchlist });
+    const current = await getUserWatchlist(userId);
+    const matched =
+      findWatchlistSymbol(current, symbol) ??
+      resolveSymbolInput(symbol).symbol ??
+      symbol.trim().toUpperCase();
+    const watchlist = await removeFromUserWatchlist(userId, matched);
+    return NextResponse.json({ ok: true, symbol: matched, watchlist });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to remove symbol";

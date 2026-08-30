@@ -15,6 +15,11 @@ import {
   removeFromUserWatchlist,
 } from "@/lib/redis";
 import { sendCapabilityGapEmail } from "@/lib/email/resend";
+import {
+  defaultExchangeForSymbol,
+  findWatchlistSymbol,
+  resolveSymbolInput,
+} from "@/lib/symbols";
 import { computeWhatIf } from "@/lib/whatif";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
@@ -52,7 +57,11 @@ export function createDeskTools(userId: string) {
           .describe("Exchange label, default NASDAQ"),
       }),
       execute: async ({ symbol, exchange }) => {
-        const snapshot = await loadSnapshot(symbol, exchange ?? "NASDAQ");
+        const resolved = resolveSymbolInput(symbol, exchange);
+        const snapshot = await loadSnapshot(
+          resolved.symbol,
+          exchange ?? resolved.exchange,
+        );
         return slimSnapshot(snapshot);
       },
     }),
@@ -72,9 +81,11 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. Always call when the user asks to monitor — even if an older chat turn said it was added (they may have removed it in the UI). Returns alreadyWatched if it was already present.",
+        "Add one ticker to the user's watchlist after verifying market data. Accepts equities and crypto aliases (bitcoin→BTC/USD). Always call when the user asks to monitor — even if an older chat turn said it was added. Returns alreadyWatched / assetClass.",
       inputSchema: z.object({
-        symbol: z.string(),
+        symbol: z
+          .string()
+          .describe("Ticker or name, e.g. AAPL, bitcoin, BTC/USD"),
         exchange: z.string().optional(),
       }),
       execute: async ({ symbol, exchange }) => {
@@ -87,12 +98,15 @@ export function createDeskTools(userId: string) {
           const watchlist = await addToUserWatchlist(
             userId,
             verified,
-            exchange ?? "NASDAQ",
+            exchange ?? defaultExchangeForSymbol(verified),
           );
           return {
             ok: true,
             symbol: verified,
             alreadyWatched,
+            assetClass: defaultExchangeForSymbol(verified) === "CRYPTO"
+              ? "crypto"
+              : "equity",
             watchlist,
           };
         } catch (error) {
@@ -126,6 +140,7 @@ export function createDeskTools(userId: string) {
           symbol: string;
           ok: boolean;
           alreadyWatched?: boolean;
+          assetClass?: "crypto" | "equity";
           error?: string;
         }> = [];
 
@@ -136,10 +151,18 @@ export function createDeskTools(userId: string) {
             await addToUserWatchlist(
               userId,
               verified,
-              exchange ?? "NASDAQ",
+              exchange ?? defaultExchangeForSymbol(verified),
             );
             beforeSet.add(verified);
-            results.push({ symbol: verified, ok: true, alreadyWatched });
+            results.push({
+              symbol: verified,
+              ok: true,
+              alreadyWatched,
+              assetClass:
+                defaultExchangeForSymbol(verified) === "CRYPTO"
+                  ? "crypto"
+                  : "equity",
+            });
           } catch (error) {
             results.push({
               symbol: raw.trim().toUpperCase(),
@@ -170,24 +193,24 @@ export function createDeskTools(userId: string) {
           .describe("Ticker to remove, e.g. BTC, AMZN, GOOG"),
       }),
       execute: async ({ symbol }) => {
-        const normalized = symbol.trim().toUpperCase();
         const before = await getUserWatchlist(userId);
-        const wasPresent = before.some((entry) => entry.symbol === normalized);
-        if (!wasPresent) {
+        const matched = findWatchlistSymbol(before, symbol);
+        if (!matched) {
+          const fallback = resolveSymbolInput(symbol).symbol || symbol.trim().toUpperCase();
           return {
             ok: true,
             removed: false,
-            symbol: normalized,
+            symbol: fallback,
             wasPresent: false,
             watchlist: before,
-            message: `${normalized} was not on the watchlist`,
+            message: `${fallback} was not on the watchlist`,
           };
         }
-        const watchlist = await removeFromUserWatchlist(userId, normalized);
+        const watchlist = await removeFromUserWatchlist(userId, matched);
         return {
           ok: true,
           removed: true,
-          symbol: normalized,
+          symbol: matched,
           wasPresent: true,
           watchlist,
         };
@@ -271,6 +294,7 @@ export function createDeskTools(userId: string) {
         );
         return {
           count: recommendations.length,
+          tip: "Paper trading is chat-only: “buy 5 SYMBOL” opens a long; “sell SYMBOL” / “close my SYMBOL” closes it (fake $100k cash, real marks). Mention buy + sell briefly after listing picks — do not trade unless they ask.",
           recommendations: recommendations.map((r) => ({
             symbol: r.symbol,
             exchange: r.exchange,
@@ -311,7 +335,8 @@ export function createDeskTools(userId: string) {
     }),
 
     paperSell: tool({
-      description: "Close an open paper position; proceeds return to paper cash.",
+      description:
+        "Close an open paper position; proceeds return to paper cash. Call for sell / close / exit / flatten intents (e.g. “sell NVDA”, “close my bitcoin”). Resolve the symbol from context or live portfolio if they say “it” / “that”.",
       inputSchema: z.object({
         symbol: z.string().optional(),
         positionId: z.string().optional(),

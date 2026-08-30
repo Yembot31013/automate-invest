@@ -1,4 +1,5 @@
 import { fetchDailyOhlc } from "@/lib/market";
+import { resolveSymbolInput } from "@/lib/symbols";
 import type { OhlcBar, WhatIfResult } from "@/types";
 
 function parseDay(input: string): Date {
@@ -44,7 +45,7 @@ export async function computeWhatIf(params: {
   quantity?: number;
   entryPrice?: number;
 }): Promise<WhatIfResult> {
-  const symbol = params.symbol.trim().toUpperCase();
+  const symbol = resolveSymbolInput(params.symbol).symbol;
   if (!symbol) {
     throw new Error("Symbol is required");
   }

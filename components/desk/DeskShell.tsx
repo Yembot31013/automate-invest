@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountButton } from "@/components/auth/AccountButton";
 import { CHAT_CHIPS, DeskChat } from "@/components/desk/DeskChat";
+import {
+  PaperBookModal,
+  type PaperPositionRow,
+} from "@/components/desk/PaperBookModal";
 import { Sparkline } from "@/components/desk/Sparkline";
 import { TradingViewModal } from "@/components/desk/TradingViewModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -37,6 +41,7 @@ type PortfolioPayload = {
   totalMarketValue: number;
   totalUnrealizedPnl: number;
   totalUnrealizedPnlPct: number;
+  positions?: PaperPositionRow[];
 };
 
 const ACCENTS = [
@@ -106,6 +111,7 @@ export function DeskShell() {
     symbol: string;
     exchange: string;
   } | null>(null);
+  const [paperBookOpen, setPaperBookOpen] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>(null);
@@ -245,20 +251,22 @@ export function DeskShell() {
       const res = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, exchange: "NASDAQ" }),
+        body: JSON.stringify({ symbol }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
+        symbol?: string;
         error?: string;
       };
       if (!res.ok || data.ok === false) {
         throw new Error(data.error ?? "Failed to add symbol");
       }
+      const added = data.symbol ?? symbol;
       setSymbolInput("");
-      setActivityLog((prev) => [`Monitored ${symbol}`, ...prev].slice(0, 12));
+      setActivityLog((prev) => [`Monitored ${added}`, ...prev].slice(0, 12));
       showToast({
         kind: "ok",
-        message: `${symbol} is on your watchlist. Nice.`,
+        message: `${added} is on your watchlist. Nice.`,
       });
       await refresh({ quiet: true });
     } catch (err) {
@@ -635,95 +643,132 @@ export function DeskShell() {
         className={`space-y-3 overflow-y-auto px-4 py-4 ${refreshing ? "opacity-80" : ""}`}
       >
         <p className="font-mono-label">Paper book</p>
+        <p className="text-[0.7rem] text-[var(--muted)]">
+          Equity = cash + positions · hover tiles for exact $ · tap Open for
+          holdings
+        </p>
         {loading && !portfolio ? (
-          <div className="grid grid-cols-2 gap-2" aria-busy="true">
+          <div className="paper-metrics" aria-busy="true">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="metric-tile bg-[color-mix(in_srgb,var(--white)_80%,transparent)]">
-                <Skeleton lines={2} />
+              <div key={i} className="paper-metric-cell">
+                <div className="metric-tile h-full bg-[color-mix(in_srgb,var(--white)_80%,transparent)]">
+                  <Skeleton lines={2} />
+                </div>
               </div>
             ))}
           </div>
         ) : portfolio ? (
-          <div className="grid grid-cols-2 gap-2">
-            <Tip
-              label="Cash + market value of open paper positions"
-              as="div"
-              className="min-w-0"
-            >
-              <div
-                className="metric-tile"
-                style={{
-                  background: "color-mix(in srgb, var(--yellow) 35%, var(--mix))",
-                }}
+          <div className="paper-metrics">
+            <div className="paper-metric-cell">
+              <Tip
+                label={`Equity (total account)\n${formatUsd(portfolio.equity)}\nCash left ${formatUsd(portfolio.cash)} + positions worth ${formatUsd(portfolio.totalMarketValue)}`}
+                as="div"
+                className="min-w-0"
               >
-                <p className="font-mono-label">Equity</p>
-                <p className="metric-value" title={formatUsd(portfolio.equity)}>
-                  {formatUsdCompact(portfolio.equity)}
-                </p>
-              </div>
-            </Tip>
-            <Tip
-              label="Unrealized profit or loss on open paper trades"
-              as="div"
-              className="min-w-0"
-            >
-              <div
-                className="metric-tile"
-                style={{
-                  background: pnlPositive
-                    ? "color-mix(in srgb, var(--green) 35%, var(--mix))"
-                    : "color-mix(in srgb, var(--orange) 35%, var(--mix))",
-                }}
-              >
-                <p className="font-mono-label">PnL</p>
-                <p
-                  className="metric-value"
-                  title={formatUsd(portfolio.totalUnrealizedPnl)}
+                <button
+                  type="button"
+                  className="metric-tile metric-tile-button"
+                  style={{
+                    background:
+                      "color-mix(in srgb, var(--yellow) 35%, var(--mix))",
+                  }}
+                  onClick={() => setPaperBookOpen(true)}
+                  aria-label={`Equity ${formatUsd(portfolio.equity)}. Open holdings.`}
                 >
-                  {formatUsdCompact(portfolio.totalUnrealizedPnl)}
-                </p>
-                <p className="text-xs text-[var(--muted)]">
-                  {formatPct(portfolio.totalUnrealizedPnlPct)}
-                </p>
-              </div>
-            </Tip>
-            <Tip
-              label="Cash left in your $100k paper account"
-              as="div"
-              className="min-w-0"
-            >
-              <div
-                className="metric-tile"
-                style={{
-                  background: "color-mix(in srgb, var(--blue) 32%, var(--mix))",
-                }}
+                  <p className="font-mono-label">Equity</p>
+                  <p className="metric-value">
+                    {formatUsdCompact(portfolio.equity)}
+                  </p>
+                  <p className="metric-meta" aria-hidden="true">
+                    &nbsp;
+                  </p>
+                </button>
+              </Tip>
+            </div>
+            <div className="paper-metric-cell">
+              <Tip
+                label={`Unrealized PnL\n${formatUsd(portfolio.totalUnrealizedPnl)} (${formatPct(portfolio.totalUnrealizedPnlPct)})\nGain/loss vs what you paid for open lots (${formatUsd(portfolio.totalCost)})`}
+                as="div"
+                className="min-w-0"
               >
-                <p className="font-mono-label">Cash</p>
-                <p className="metric-value" title={formatUsd(portfolio.cash)}>
-                  {formatUsdCompact(portfolio.cash)}
-                </p>
-              </div>
-            </Tip>
-            <Tip
-              label="How many paper positions are currently open"
-              as="div"
-              className="min-w-0"
-            >
-              <div
-                className="metric-tile"
-                style={{
-                  background: "color-mix(in srgb, var(--lavender) 40%, var(--mix))",
-                }}
+                <button
+                  type="button"
+                  className="metric-tile metric-tile-button"
+                  style={{
+                    background: pnlPositive
+                      ? "color-mix(in srgb, var(--green) 35%, var(--mix))"
+                      : "color-mix(in srgb, var(--orange) 35%, var(--mix))",
+                  }}
+                  onClick={() => setPaperBookOpen(true)}
+                  aria-label={`PnL ${formatUsd(portfolio.totalUnrealizedPnl)}. Open holdings.`}
+                >
+                  <p className="font-mono-label">PnL</p>
+                  <p className="metric-value">
+                    {formatUsdCompact(portfolio.totalUnrealizedPnl)}
+                  </p>
+                  <p className="metric-meta">
+                    {formatPct(portfolio.totalUnrealizedPnlPct)}
+                  </p>
+                </button>
+              </Tip>
+            </div>
+            <div className="paper-metric-cell">
+              <Tip
+                label={`Cash left\n${formatUsd(portfolio.cash)}\nStarted at $100,000.00 · ${formatUsd(portfolio.totalCost)} tied up in open positions`}
+                as="div"
+                className="min-w-0"
               >
-                <p className="font-mono-label">Open</p>
-                <p className="metric-value">{portfolio.openCount}</p>
-              </div>
-            </Tip>
+                <button
+                  type="button"
+                  className="metric-tile metric-tile-button"
+                  style={{
+                    background:
+                      "color-mix(in srgb, var(--blue) 32%, var(--mix))",
+                  }}
+                  onClick={() => setPaperBookOpen(true)}
+                  aria-label={`Cash ${formatUsd(portfolio.cash)}. Open holdings.`}
+                >
+                  <p className="font-mono-label">Cash</p>
+                  <p className="metric-value">
+                    {formatUsdCompact(portfolio.cash)}
+                  </p>
+                  <p className="metric-meta" aria-hidden="true">
+                    &nbsp;
+                  </p>
+                </button>
+              </Tip>
+            </div>
+            <div className="paper-metric-cell">
+              <Tip
+                label={
+                  portfolio.openCount === 0
+                    ? "No open positions yet\nClick to open the holdings sheet"
+                    : `${portfolio.openCount} open position${portfolio.openCount === 1 ? "" : "s"}\nWorth ${formatUsd(portfolio.totalMarketValue)} · click for tickers, qty, cost & PnL`
+                }
+                as="div"
+                className="min-w-0"
+              >
+                <button
+                  type="button"
+                  className="metric-tile metric-tile-button"
+                  style={{
+                    background:
+                      "color-mix(in srgb, var(--lavender) 40%, var(--mix))",
+                  }}
+                  onClick={() => setPaperBookOpen(true)}
+                  aria-label={`${portfolio.openCount} open. View holdings.`}
+                >
+                  <p className="font-mono-label">Open</p>
+                  <p className="metric-value">{portfolio.openCount}</p>
+                  <p className="metric-meta">View holdings</p>
+                </button>
+              </Tip>
+            </div>
           </div>
         ) : (
           <EmptyHint
             title="No paper trades yet"
-            body="Ask the sidekick to buy something on paper — e.g. “buy 5 NVDA”."
+            body='Tap Paper buy / Paper sell in the sidekick chips, or say “buy 5 NVDA” / “sell NVDA” / “close my BTC” — fake cash, real prices.'
           />
         )}
 
@@ -1015,6 +1060,26 @@ export function DeskShell() {
         }}
         onConfirm={() => {
           if (pendingRemove) void removeSymbol(pendingRemove);
+        }}
+      />
+
+      <PaperBookModal
+        open={paperBookOpen && portfolio != null}
+        cash={portfolio?.cash ?? 0}
+        equity={portfolio?.equity ?? 0}
+        totalCost={portfolio?.totalCost ?? 0}
+        totalMarketValue={portfolio?.totalMarketValue ?? 0}
+        totalUnrealizedPnl={portfolio?.totalUnrealizedPnl ?? 0}
+        totalUnrealizedPnlPct={portfolio?.totalUnrealizedPnlPct ?? 0}
+        positions={portfolio?.positions ?? []}
+        onClose={() => setPaperBookOpen(false)}
+        onAskSell={(symbol) => {
+          setPaperBookOpen(false);
+          setMobilePanel("chat");
+          setExternalPrompt(
+            `Sell / close my open paper position in ${symbol} and return the cash to my paper book.`,
+          );
+          setComposerFocusKey((k) => k + 1);
         }}
       />
 

@@ -6,6 +6,7 @@ import {
   fetchDailyOhlc,
   fetchNewsSentiment,
 } from "@/lib/market";
+import { defaultExchangeForSymbol, isCryptoPair, resolveSymbolInput } from "@/lib/symbols";
 import {
   getPaperCash,
   getPaperPositions,
@@ -65,7 +66,8 @@ export async function paperBuy(params: {
   entryPrice?: number;
   notes?: string;
 }): Promise<PaperPositionMark & { cashRemaining: number }> {
-  const symbol = params.symbol.trim().toUpperCase();
+  const resolved = resolveSymbolInput(params.symbol);
+  const symbol = resolved.symbol;
   if (!symbol) {
     throw new Error("Symbol is required");
   }
@@ -93,7 +95,11 @@ export async function paperBuy(params: {
   const position: PaperPosition = {
     id: createId(),
     symbol,
-    exchange: (params.exchange ?? "NASDAQ").toUpperCase(),
+    exchange: (
+      params.exchange ??
+      resolved.exchange ??
+      defaultExchangeForSymbol(symbol)
+    ).toUpperCase(),
     side: "long",
     quantity: params.quantity,
     entryPrice,
@@ -123,8 +129,14 @@ export async function paperSell(params: {
   if (params.positionId) {
     target = open.find((p) => p.id === params.positionId);
   } else if (params.symbol) {
-    const symbol = params.symbol.trim().toUpperCase();
-    target = [...open].reverse().find((p) => p.symbol === symbol);
+    const want = resolveSymbolInput(params.symbol).symbol;
+    target = [...open]
+      .reverse()
+      .find(
+        (p) =>
+          p.symbol === want ||
+          p.symbol.replaceAll("/", "") === want.replaceAll("/", ""),
+      );
   }
 
   if (!target) {
@@ -192,12 +204,18 @@ export async function getPortfolioSummary(
   };
 }
 
-/** Full snapshot with sentiment + recent headlines. */
+/** Full snapshot with sentiment + recent headlines (equities). Crypto skips Finnhub news. */
 export async function loadSnapshot(symbol: string, exchange = "NASDAQ") {
+  const crypto = isCryptoPair(symbol);
   const [series, sentiment, headlines] = await Promise.all([
     fetchDailyOhlc(symbol),
-    fetchNewsSentiment(symbol),
-    fetchCompanyNews(symbol, 3, 3),
+    crypto ? Promise.resolve(null) : fetchNewsSentiment(symbol),
+    crypto ? Promise.resolve([]) : fetchCompanyNews(symbol, 3, 3),
   ]);
-  return buildMarketSnapshot(series, exchange, sentiment, headlines);
+  return buildMarketSnapshot(
+    series,
+    crypto ? "CRYPTO" : exchange,
+    sentiment,
+    headlines,
+  );
 }

@@ -262,6 +262,12 @@ body {
   padding: 1.25rem 1.35rem 1.15rem;
 }
 
+.paper-book-modal {
+  width: min(100%, 520px);
+  max-height: min(90dvh, 720px);
+  overflow: auto;
+}
+
 .modal-card-chart {
   display: flex;
   flex-direction: column;
@@ -904,9 +910,53 @@ body {
   box-shadow: var(--shadow-soft);
   min-width: 0;
   overflow: hidden;
+  box-sizing: border-box;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+/** Paper book 2×2 — equal columns, stretched rows, shared tile height. */
+.paper-metrics {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 0.5rem;
+  align-items: stretch;
+  width: 100%;
+}
+
+.paper-metrics > .paper-metric-cell {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.paper-metrics > .paper-metric-cell > .tip-anchor {
+  display: flex !important;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+}
+
+.metric-tile-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 5.5rem;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
 }
 
 .metric-tile:hover {
@@ -921,6 +971,21 @@ body {
   letter-spacing: -0.03em;
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+/* Reserved second line so Equity/Cash match PnL/Open height */
+.metric-tile .metric-meta {
+  margin-top: 0.2rem;
+  min-height: 1rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1rem;
+  color: var(--muted);
+  width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -945,7 +1010,8 @@ div.tip-anchor {
   position: fixed;
   z-index: 10000;
   width: max-content;
-  max-width: min(260px, calc(100vw - 24px));
+  max-width: min(320px, calc(100vw - 24px));
+  white-space: pre-line;
   padding: 0.5rem 0.75rem;
   border-radius: 12px;
   background: var(--ink);

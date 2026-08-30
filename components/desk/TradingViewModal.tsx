@@ -12,21 +12,36 @@ type TradingViewModalProps = {
   onClose: () => void;
 };
 
+/** Compact crypto pair for TradingView (BTC/USD → BTCUSD). */
+function toTradingViewCryptoCode(symbol: string): string {
+  const compact = symbol.trim().toUpperCase().replaceAll(/[/-]/g, "");
+  if (!compact) return "BTCUSD";
+  if (compact.endsWith("USD")) return compact;
+  return `${compact}USD`;
+}
+
 /** Map desk tickers to TradingView symbols (crypto needs a venue pair). */
 export function toTradingViewSymbol(symbol: string, exchange?: string): string {
   const sym = symbol.trim().toUpperCase();
   if (!sym) return "NASDAQ:AAPL";
+
+  const ex = (exchange ?? "NASDAQ").trim().toUpperCase() || "NASDAQ";
+  const looksCrypto =
+    ex === "CRYPTO" ||
+    ex === "COINBASE" ||
+    ex === "BINANCE" ||
+    sym.includes("/") ||
+    sym.includes("-");
+
+  if (looksCrypto) {
+    return `COINBASE:${toTradingViewCryptoCode(sym)}`;
+  }
 
   if (sym === "BTC" || sym === "BTCUSD" || sym === "XBT") {
     return "COINBASE:BTCUSD";
   }
   if (sym === "ETH" || sym === "ETHUSD") {
     return "COINBASE:ETHUSD";
-  }
-
-  const ex = (exchange ?? "NASDAQ").trim().toUpperCase() || "NASDAQ";
-  if (ex === "CRYPTO" || ex === "COINBASE" || ex === "BINANCE") {
-    return `COINBASE:${sym.endsWith("USD") ? sym : `${sym}USD`}`;
   }
 
   return `${ex}:${sym}`;
