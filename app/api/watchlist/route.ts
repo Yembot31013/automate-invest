@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-import { MarketDataError, verifyTradableSymbol } from "@/lib/market";
+import { MarketDataError, verifyTradableSymbolDetailed } from "@/lib/market";
 import {
   addToUserWatchlist,
   getUserWatchlist,
@@ -9,7 +9,6 @@ import {
   WatchlistLimitError,
 } from "@/lib/redis";
 import {
-  defaultExchangeForSymbol,
   findWatchlistSymbol,
   resolveSymbolInput,
 } from "@/lib/symbols";
@@ -66,13 +65,19 @@ export async function POST(request: Request) {
 
   try {
     const body = parseBody(await request.json());
-    const symbol = await verifyTradableSymbol(body.symbol);
+    const verified = await verifyTradableSymbolDetailed(
+      body.symbol,
+      body.exchange,
+    );
     const watchlist = await addToUserWatchlist(
       userId,
-      symbol,
-      body.exchange ?? defaultExchangeForSymbol(symbol),
+      verified.symbol,
+      body.exchange ?? verified.exchange,
     );
-    return NextResponse.json({ ok: true, symbol, watchlist }, { status: 201 });
+    return NextResponse.json(
+      { ok: true, symbol: verified.symbol, exchange: verified.exchange, watchlist },
+      { status: 201 },
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to add symbol";

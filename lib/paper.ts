@@ -5,8 +5,15 @@ import {
   fetchDailyOhlc,
   fetchHeadlinesForSymbol,
   fetchNewsSentiment,
+  toPaperUsdPrice,
 } from "@/lib/market";
-import { defaultExchangeForSymbol, isCryptoPair, listSupportedCryptoPairs, resolveSymbolInput } from "@/lib/symbols";
+import {
+  defaultExchangeForSymbol,
+  isCryptoPair,
+  isNgxExchange,
+  listSupportedCryptoPairs,
+  resolveSymbolInput,
+} from "@/lib/symbols";
 import {
   getPaperCash,
   getPaperPositions,
@@ -23,12 +30,16 @@ function createId(): string {
   return `pp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function markPriceFor(symbol: string): Promise<number> {
-  const series = await fetchDailyOhlc(symbol);
+async function markPriceFor(symbol: string, exchange?: string): Promise<number> {
+  const resolved = resolveSymbolInput(symbol, exchange);
+  const series = await fetchDailyOhlc(resolved.symbol, undefined, resolved.exchange);
   if (!series.bars.length) {
-    throw new Error(`No price data for ${symbol}`);
+    throw new Error(`No price data for ${resolved.symbol}`);
   }
-  return series.bars[series.bars.length - 1].close;
+  const native = series.bars[series.bars.length - 1].close;
+  const venue =
+    exchange ?? resolved.exchange ?? defaultExchangeForSymbol(resolved.symbol);
+  return toPaperUsdPrice(native, venue);
 }
 
 function toMark(
@@ -80,10 +91,16 @@ export async function paperBuy(params: {
     throw new Error("Quantity must be a positive number");
   }
 
+  const exchange = (
+    params.exchange ??
+    resolved.exchange ??
+    defaultExchangeForSymbol(symbol)
+  ).toUpperCase();
+
   const entryPrice =
     params.entryPrice != null && Number.isFinite(params.entryPrice)
-      ? params.entryPrice
-      : await markPriceFor(symbol);
+      ? await toPaperUsdPrice(params.entryPrice, exchange)
+      : await markPriceFor(symbol, exchange);
 
   if (entryPrice <= 0) {
     throw new Error("Entry price must be positive");
@@ -100,11 +117,7 @@ export async function paperBuy(params: {
   const position: PaperPosition = {
     id: createId(),
     symbol,
-    exchange: (
-      params.exchange ??
-      resolved.exchange ??
-      defaultExchangeForSymbol(symbol)
-    ).toUpperCase(),
+    exchange,
     side: "long",
     quantity: params.quantity,
     entryPrice,
@@ -150,8 +163,8 @@ export async function paperSell(params: {
 
   const exitPrice =
     params.exitPrice != null && Number.isFinite(params.exitPrice)
-      ? params.exitPrice
-      : await markPriceFor(target.symbol);
+      ? await toPaperUsdPrice(params.exitPrice, target.exchange)
+      : await markPriceFor(target.symbol, target.exchange);
 
   const proceeds = exitPrice * target.quantity;
   const cash = await getPaperCash(params.userId);
@@ -179,7 +192,7 @@ export async function getPortfolioSummary(
 
   const marks = await mapPool(open, 4, async (position) => {
     try {
-      const mark = await markPriceFor(position.symbol);
+      const mark = await markPriceFor(position.symbol, position.exchange);
       return toMark(position, mark);
     } catch (error) {
       logger.error("paper", "mark failed", {
@@ -209,18 +222,18 @@ export async function getPortfolioSummary(
   };
 }
 
-/** Full snapshot — equities use company-news; crypto uses Finnhub crypto category. */
+/** Full snapshot — equities use company-news; crypto uses Finnhub crypto; NGX uses NGN Market. */
 export async function loadSnapshot(symbol: string, exchange = "NASDAQ") {
-  const crypto = isCryptoPair(symbol);
+  const resolved = resolveSymbolInput(symbol, exchange);
+  const crypto = isCryptoPair(resolved.symbol);
+  const ngx = isNgxExchange(exchange) || isNgxExchange(resolved.exchange);
+  const venue = crypto ? "CRYPTO" : ngx ? "NGX" : exchange;
   const [series, sentiment, headlines] = await Promise.all([
-    fetchDailyOhlc(symbol),
-    crypto ? Promise.resolve(null) : fetchNewsSentiment(symbol),
-    fetchHeadlinesForSymbol(symbol, 3),
+    fetchDailyOhlc(resolved.symbol, undefined, venue),
+    crypto || ngx
+      ? Promise.resolve(null)
+      : fetchNewsSentiment(resolved.symbol),
+    fetchHeadlinesForSymbol(resolved.symbol, 3, venue),
   ]);
-  return buildMarketSnapshot(
-    series,
-    crypto ? "CRYPTO" : exchange,
-    sentiment,
-    headlines,
-  );
+  return buildMarketSnapshot(series, venue, sentiment, headlines);
 }

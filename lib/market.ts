@@ -8,8 +8,18 @@ import type {
 import { acquireFinnhubSlot, cacheGet, cacheSet } from "@/lib/cache";
 import { logger } from "@/lib/logger";
 import {
+  convertNgnToUsd,
+  fetchNgxCompanyChart,
+  fetchNgxCompanyNews,
+  hasNgnMarketCredentials,
+  isListedOnNgx,
+  NgnMarketError,
+} from "@/lib/ngnmarket";
+import {
   defaultExchangeForSymbol,
   isCryptoPair,
+  isKnownNgxTicker,
+  isNgxExchange,
   listSupportedCryptoPairs,
   resolveSymbolInput,
   cryptoNewsNeedles,
@@ -320,15 +330,41 @@ function hasAlpacaCredentials(): boolean {
   );
 }
 
+async function fetchNgxDailyOhlc(
+  symbol: string,
+  lookbackDays = DEFAULT_LOOKBACK_DAYS,
+): Promise<CandleSeries> {
+  if (!hasNgnMarketCredentials()) {
+    throw new MarketDataError(
+      "NGX listings need NGNMARKET_API_KEY configured (https://ngnmarket.com/developer)",
+    );
+  }
+
+  try {
+    const series = await fetchNgxCompanyChart(symbol, lookbackDays);
+    return { symbol: series.symbol, bars: series.bars };
+  } catch (error) {
+    if (error instanceof NgnMarketError) {
+      throw new MarketDataError(
+        error.code === "PLAN_REQUIRED" || error.status === 403
+          ? `NGX data for ${symbol} needs a higher NGN Market plan (Hobby for charts). Free still serves live quotes — check NGNMARKET_API_KEY and plan at https://ngnmarket.com/developer`
+          : error.message,
+      );
+    }
+    throw error;
+  }
+}
+
 /**
  * Daily OHLC for desk math (SMA, volume ratio, dip %).
- * Crypto pairs use Alpaca spot; equities prefer Alpaca then Finnhub candles.
+ * Crypto → Alpaca spot; NGX → NGN Market; US equities → Alpaca then Finnhub.
  */
 export async function fetchDailyOhlc(
   symbol: string,
   lookbackDays = DEFAULT_LOOKBACK_DAYS,
+  exchangeHint?: string,
 ): Promise<CandleSeries> {
-  const resolved = resolveSymbolInput(symbol);
+  const resolved = resolveSymbolInput(symbol, exchangeHint);
   if (resolved.unsupportedCrypto) {
     throw new MarketDataError(
       `Unsupported crypto ${resolved.symbol}. Supported pairs: ${listSupportedCryptoPairs().join(", ")}`,
@@ -342,6 +378,14 @@ export async function fetchDailyOhlc(
       );
     }
     return fetchAlpacaCryptoBars(resolved.symbol, lookbackDays);
+  }
+
+  if (
+    isNgxExchange(resolved.exchange) ||
+    isNgxExchange(exchangeHint) ||
+    isKnownNgxTicker(resolved.symbol)
+  ) {
+    return fetchNgxDailyOhlc(resolved.symbol, lookbackDays);
   }
 
   const equitySymbol = resolved.symbol;
@@ -369,12 +413,28 @@ export async function fetchDailyOhlc(
   );
 }
 
+export type VerifiedSymbol = {
+  symbol: string;
+  exchange: string;
+};
+
 /**
  * Confirm a ticker resolves with the same OHLC path the desk uses.
- * Returns the canonical symbol (e.g. BTC/USD for bitcoin). Throws MarketDataError.
+ * Returns canonical symbol + exchange (e.g. BTC/USD+CRYPTO, DANGCEM+NGX).
  */
-export async function verifyTradableSymbol(symbol: string): Promise<string> {
-  const resolved = resolveSymbolInput(symbol);
+export async function verifyTradableSymbol(
+  symbol: string,
+  exchangeHint?: string,
+): Promise<string> {
+  const verified = await verifyTradableSymbolDetailed(symbol, exchangeHint);
+  return verified.symbol;
+}
+
+export async function verifyTradableSymbolDetailed(
+  symbol: string,
+  exchangeHint?: string,
+): Promise<VerifiedSymbol> {
+  const resolved = resolveSymbolInput(symbol, exchangeHint);
   if (!resolved.symbol) {
     throw new MarketDataError("Symbol is required");
   }
@@ -384,14 +444,38 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
     );
   }
 
-  try {
-    const series = await fetchDailyOhlc(resolved.symbol, 15);
+  const tryFetch = async (sym: string, exchange?: string) => {
+    const series = await fetchDailyOhlc(sym, 15, exchange);
     if (!series.bars.length) {
       throw new MarketDataError(
-        `No market history for ${resolved.symbol} — check the ticker and try again`,
+        `No market history for ${sym} — check the ticker and try again`,
       );
     }
-    return series.symbol || resolved.symbol;
+    return series.symbol || sym;
+  };
+
+  try {
+    if (isNgxExchange(resolved.exchange) || isKnownNgxTicker(resolved.symbol)) {
+      const canonical = await tryFetch(resolved.symbol, "NGX");
+      return { symbol: canonical, exchange: "NGX" };
+    }
+
+    try {
+      const canonical = await tryFetch(resolved.symbol, resolved.exchange);
+      return {
+        symbol: canonical,
+        exchange: defaultExchangeForSymbol(canonical),
+      };
+    } catch (usError) {
+      if (
+        hasNgnMarketCredentials() &&
+        (await isListedOnNgx(resolved.symbol))
+      ) {
+        const canonical = await tryFetch(resolved.symbol, "NGX");
+        return { symbol: canonical, exchange: "NGX" };
+      }
+      throw usError;
+    }
   } catch (error) {
     if (error instanceof MarketDataError) {
       const msg = error.message;
@@ -401,9 +485,7 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
         );
       }
       throw new MarketDataError(
-        msg.includes("not added")
-          ? msg
-          : `${msg} — symbol was not added.`,
+        msg.includes("not added") ? msg : `${msg} — symbol was not added.`,
       );
     }
     throw new MarketDataError(
@@ -414,9 +496,27 @@ export async function verifyTradableSymbol(symbol: string): Promise<string> {
   }
 }
 
+/** Convert an NGX NGN mark into USD for the shared paper cash ledger. */
+export async function toPaperUsdPrice(
+  price: number,
+  exchange: string,
+): Promise<number> {
+  if (!isNgxExchange(exchange)) return price;
+  try {
+    return await convertNgnToUsd(price);
+  } catch (error) {
+    throw new MarketDataError(
+      `Could not convert NGN→USD for paper marks: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 export {
   defaultExchangeForSymbol,
   isCryptoPair,
+  isNgxExchange,
   listSupportedCryptoPairs,
   resolveSymbolInput,
 };
@@ -669,15 +769,24 @@ export async function fetchCryptoMarketNews(
   }
 }
 
-/** Equity → company-news; crypto → category=crypto feed (never mixes the two paths). */
+/** Equity → company-news; crypto → Finnhub crypto feed; NGX → NGN Market news. */
 export async function fetchHeadlinesForSymbol(
   symbol: string,
   limit = 3,
+  exchangeHint?: string,
 ): Promise<CompanyNewsItem[]> {
-  if (isCryptoPair(symbol) || resolveSymbolInput(symbol).assetClass === "crypto") {
+  const resolved = resolveSymbolInput(symbol, exchangeHint);
+  if (isCryptoPair(symbol) || resolved.assetClass === "crypto") {
     return fetchCryptoMarketNews(symbol, limit);
   }
-  return fetchCompanyNews(symbol, 3, limit);
+  if (
+    isNgxExchange(resolved.exchange) ||
+    isNgxExchange(exchangeHint) ||
+    isKnownNgxTicker(resolved.symbol)
+  ) {
+    return fetchNgxCompanyNews(resolved.symbol, limit);
+  }
+  return fetchCompanyNews(resolved.symbol, 3, limit);
 }
 
 export function buildMarketSnapshot(

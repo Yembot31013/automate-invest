@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 
-import { verifyTradableSymbol } from "@/lib/market";
+import { verifyTradableSymbolDetailed } from "@/lib/market";
 import {
   getPortfolioSummary,
   loadSnapshot,
@@ -17,7 +17,6 @@ import {
 import { sendCapabilityGapEmail } from "@/lib/email/resend";
 import { MAX_USER_WATCHLIST } from "@/lib/limits";
 import {
-  defaultExchangeForSymbol,
   findWatchlistSymbol,
   resolveSymbolInput,
 } from "@/lib/symbols";
@@ -82,34 +81,36 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended; crypto is allowlist-only. Watchlist max is " +
+        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended (US + NGX Nigeria); crypto is allowlist-only. For Nigerian names use e.g. DANGCEM, GTCO, NGX:ACCESS, or 'dangote cement'. Watchlist max is " +
         String(MAX_USER_WATCHLIST) +
-        ". Always call when the user asks to monitor. Returns alreadyWatched / assetClass.",
+        ". Always call when the user asks to monitor. Returns alreadyWatched / assetClass / exchange.",
       inputSchema: z.object({
         symbol: z
           .string()
-          .describe("Ticker or name, e.g. AAPL, bitcoin, BTC/USD"),
+          .describe(
+            "Ticker or name, e.g. AAPL, bitcoin, DANGCEM, dangote cement, NGX:GTCO",
+          ),
         exchange: z.string().optional(),
       }),
       execute: async ({ symbol, exchange }) => {
         try {
-          const verified = await verifyTradableSymbol(symbol);
+          const verified = await verifyTradableSymbolDetailed(symbol, exchange);
           const before = await getUserWatchlist(userId);
           const alreadyWatched = before.some(
-            (entry) => entry.symbol === verified,
+            (entry) => entry.symbol === verified.symbol,
           );
           const watchlist = await addToUserWatchlist(
             userId,
-            verified,
-            exchange ?? defaultExchangeForSymbol(verified),
+            verified.symbol,
+            exchange ?? verified.exchange,
           );
           return {
             ok: true,
-            symbol: verified,
+            symbol: verified.symbol,
+            exchange: verified.exchange,
             alreadyWatched,
-            assetClass: defaultExchangeForSymbol(verified) === "CRYPTO"
-              ? "crypto"
-              : "equity",
+            assetClass: verified.exchange === "CRYPTO" ? "crypto" : "equity",
+            currency: verified.exchange === "NGX" ? "NGN" : "USD",
             watchlist,
           };
         } catch (error) {
@@ -127,7 +128,7 @@ export function createDeskTools(userId: string) {
 
     monitorSymbols: tool({
       description:
-        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG). Prefer this when the user lists several symbols. Cap is " +
+        "Add multiple tickers to the watchlist in one go (e.g. AMZN and GOOG, or DANGCEM and GTCO). Prefer this when the user lists several symbols. Cap is " +
         String(MAX_USER_WATCHLIST) +
         " total on the list. Reports per-symbol ok/alreadyWatched/error.",
       inputSchema: z.object({
@@ -145,28 +146,28 @@ export function createDeskTools(userId: string) {
           symbol: string;
           ok: boolean;
           alreadyWatched?: boolean;
+          exchange?: string;
           assetClass?: "crypto" | "equity";
           error?: string;
         }> = [];
 
         for (const raw of symbols) {
           try {
-            const verified = await verifyTradableSymbol(raw);
-            const alreadyWatched = beforeSet.has(verified);
+            const verified = await verifyTradableSymbolDetailed(raw, exchange);
+            const alreadyWatched = beforeSet.has(verified.symbol);
             await addToUserWatchlist(
               userId,
-              verified,
-              exchange ?? defaultExchangeForSymbol(verified),
+              verified.symbol,
+              exchange ?? verified.exchange,
             );
-            beforeSet.add(verified);
+            beforeSet.add(verified.symbol);
             results.push({
-              symbol: verified,
+              symbol: verified.symbol,
               ok: true,
               alreadyWatched,
+              exchange: verified.exchange,
               assetClass:
-                defaultExchangeForSymbol(verified) === "CRYPTO"
-                  ? "crypto"
-                  : "equity",
+                verified.exchange === "CRYPTO" ? "crypto" : "equity",
             });
           } catch (error) {
             results.push({

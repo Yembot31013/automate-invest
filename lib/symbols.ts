@@ -1,7 +1,7 @@
 export type AssetClass = "equity" | "crypto";
 
 export type ResolvedSymbol = {
-  /** Canonical desk symbol — e.g. AAPL or BTC/USD */
+  /** Canonical desk symbol — e.g. AAPL, BTC/USD, or DANGCEM */
   symbol: string;
   exchange: string;
   assetClass: AssetClass;
@@ -10,6 +10,8 @@ export type ResolvedSymbol = {
    * Callers should refuse / reportCapabilityGap — do not hit Alpaca.
    */
   unsupportedCrypto?: boolean;
+  /** Quote currency for display / paper conversion. */
+  currency?: "USD" | "NGN";
 };
 
 /**
@@ -45,6 +47,71 @@ const SUPPORTED_CRYPTO_PAIRS = [
 
 const SUPPORTED_CRYPTO_PAIR_SET = new Set(SUPPORTED_CRYPTO_PAIRS);
 
+/**
+ * Well-known NGX tickers (sync resolve without an API round-trip).
+ * Prefer explicit NGX: / .NG when a short ticker could collide with US names.
+ */
+/**
+ * Auto-resolve only when the ticker is clearly NGX-first (avoids US collisions
+ * like NESTLE / UNILEVER). Use NGX:TICKER or exchange=NGX for anything else.
+ */
+const NGX_TICKER_SET = new Set([
+  "DANGCEM",
+  "BUACEMENT",
+  "BUAFOODS",
+  "GTCO",
+  "ZENITHBANK",
+  "FBNH",
+  "MTNN",
+  "AIRTELAFRI",
+  "SEPLAT",
+  "DANGSUGAR",
+  "FLOURMILL",
+  "WAPCO",
+  "OANDO",
+  "CONOIL",
+  "PRESCO",
+  "OKOMUOIL",
+  "GEREGU",
+  "TRANSPOWER",
+  "INTBREW",
+  "STERLINGNG",
+  "FIDELITYBK",
+  "UNITYBNK",
+  "WEMABANK",
+  "JAIZBANK",
+  "GUINNESS",
+]);
+
+/** Compact name aliases → NGX ticker (spaces stripped / uppercased). */
+const NGX_NAME_ALIASES: Record<string, string> = {
+  DANGOTECEMENT: "DANGCEM",
+  DANGOTE: "DANGCEM",
+  BUACEMENT: "BUACEMENT",
+  BUA: "BUACEMENT",
+  GUARANTYTRUST: "GTCO",
+  GUARANTYTRUSTBANK: "GTCO",
+  GTBANK: "GTCO",
+  ZENITHBANK: "ZENITHBANK",
+  ZENITH: "ZENITHBANK",
+  ACCESSBANK: "ACCESS",
+  ACCESSHOLDINGS: "ACCESS",
+  UNITEDBANKFORAFRICA: "UBA",
+  FBNHOLDINGS: "FBNH",
+  FIRSTBANK: "FBNH",
+  MTNNIGERIA: "MTNN",
+  MTN: "MTNN",
+  AIRTELAFRICA: "AIRTELAFRI",
+  AIRTEL: "AIRTELAFRI",
+  SEPLATENERGY: "SEPLAT",
+  NIGERIANBREWERIES: "NB",
+  GUINNESSNIGERIA: "GUINNESS",
+  DANGOTESUGAR: "DANGSUGAR",
+  FLOURMILLS: "FLOURMILL",
+  LAFARGEAFRICA: "WAPCO",
+  LAFARGE: "WAPCO",
+};
+
 function stripPairSeparators(raw: string): string {
   return raw.trim().toUpperCase().replaceAll(/\s+/g, "");
 }
@@ -54,14 +121,42 @@ export function listSupportedCryptoPairs(): string[] {
   return [...SUPPORTED_CRYPTO_PAIRS];
 }
 
+/** Example NGX tickers for prompts / help text. */
+export function listExampleNgxTickers(): string[] {
+  return ["DANGCEM", "GTCO", "MTNN", "ZENITHBANK", "BUACEMENT", "AIRTELAFRI"];
+}
+
 /** True only for allowlisted spot pairs (not arbitrary FOO/USD). */
 export function isCryptoPair(symbol: string): boolean {
   const pair = canonicalizeCryptoPair(symbol);
   return pair != null && SUPPORTED_CRYPTO_PAIR_SET.has(pair);
 }
 
+export function isNgxExchange(exchange?: string | null): boolean {
+  const ex = exchange?.trim().toUpperCase();
+  return ex === "NGX" || ex === "NGN" || ex === "NSE" || ex === "NIGERIA";
+}
+
+/** Sync check against seed list / aliases (API may know more). */
+export function isKnownNgxTicker(symbol: string): boolean {
+  const cleaned = stripPairSeparators(symbol)
+    .replace(/\.NGX$/i, "")
+    .replace(/\.NG$/i, "")
+    .replace(/^NGX:/i, "");
+  if (!cleaned) return false;
+  if (NGX_TICKER_SET.has(cleaned)) return true;
+  const aliased = NGX_NAME_ALIASES[cleaned];
+  return Boolean(aliased && NGX_TICKER_SET.has(aliased));
+}
+
 export function defaultExchangeForSymbol(symbol: string): string {
-  return isCryptoPair(symbol) ? "CRYPTO" : "NASDAQ";
+  if (isCryptoPair(symbol)) return "CRYPTO";
+  if (isKnownNgxTicker(symbol)) return "NGX";
+  return "NASDAQ";
+}
+
+export function quoteCurrencyForExchange(exchange?: string | null): "USD" | "NGN" {
+  return isNgxExchange(exchange) ? "NGN" : "USD";
 }
 
 /** Normalize BTCUSD / BTC-USD / btc → BTC/USD when allowlisted; else null. */
@@ -98,15 +193,39 @@ function looksLikeCryptoIntent(cleaned: string, hint?: string): boolean {
   if (/^[A-Z]{2,10}-USD$/.test(cleaned)) return true;
   if (/^[A-Z]{2,10}USD$/.test(cleaned) && cleaned.length <= 10) {
     const base = cleaned.slice(0, -3);
-    // Compact form only counts as crypto intent when base looks like a coin ticker
     return base.length <= 5;
   }
   return false;
 }
 
+function parseNgxVenueSymbol(raw: string): string | null {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("NGX:")) {
+    const sym = trimmed.slice(4).replaceAll(/\s+/g, "");
+    return sym || null;
+  }
+
+  const compact = stripPairSeparators(trimmed);
+  if (compact.endsWith(".NGX") || compact.endsWith(".NG")) {
+    return compact.replace(/\.NGX$/, "").replace(/\.NG$/, "") || null;
+  }
+
+  return null;
+}
+
+function canonicalizeNgxTicker(cleaned: string): string | null {
+  const fromAlias = NGX_NAME_ALIASES[cleaned];
+  if (fromAlias) return fromAlias;
+  if (NGX_TICKER_SET.has(cleaned)) return cleaned;
+  return null;
+}
+
 /**
  * Resolve free-text / ticker input to a desk symbol.
  * Crypto is allowlist-only; unknown coins are flagged unsupportedCrypto.
+ * NGX via NGX:TICKER, TICKER.NG, Nigeria exchange hints, or known Nigerian names/tickers.
  */
 export function resolveSymbolInput(
   raw: string,
@@ -114,13 +233,18 @@ export function resolveSymbolInput(
 ): ResolvedSymbol {
   const cleaned = stripPairSeparators(raw);
   if (!cleaned) {
-    return { symbol: "", exchange: "NASDAQ", assetClass: "equity" };
+    return { symbol: "", exchange: "NASDAQ", assetClass: "equity", currency: "USD" };
   }
 
   const hint = exchangeHint?.trim().toUpperCase();
   const allowlisted = canonicalizeCryptoPair(cleaned);
   if (allowlisted) {
-    return { symbol: allowlisted, exchange: "CRYPTO", assetClass: "crypto" };
+    return {
+      symbol: allowlisted,
+      exchange: "CRYPTO",
+      assetClass: "crypto",
+      currency: "USD",
+    };
   }
 
   if (looksLikeCryptoIntent(cleaned, hint)) {
@@ -136,6 +260,38 @@ export function resolveSymbolInput(
       exchange: "CRYPTO",
       assetClass: "crypto",
       unsupportedCrypto: true,
+      currency: "USD",
+    };
+  }
+
+  const venueNgx = parseNgxVenueSymbol(raw);
+  if (venueNgx) {
+    const ticker = canonicalizeNgxTicker(venueNgx) ?? venueNgx;
+    return {
+      symbol: ticker,
+      exchange: "NGX",
+      assetClass: "equity",
+      currency: "NGN",
+    };
+  }
+
+  if (isNgxExchange(hint)) {
+    const ticker = canonicalizeNgxTicker(cleaned) ?? cleaned;
+    return {
+      symbol: ticker,
+      exchange: "NGX",
+      assetClass: "equity",
+      currency: "NGN",
+    };
+  }
+
+  const ngxKnown = canonicalizeNgxTicker(cleaned);
+  if (ngxKnown) {
+    return {
+      symbol: ngxKnown,
+      exchange: "NGX",
+      assetClass: "equity",
+      currency: "NGN",
     };
   }
 
@@ -143,6 +299,7 @@ export function resolveSymbolInput(
     symbol: cleaned,
     exchange: hint && hint !== "CRYPTO" ? hint : "NASDAQ",
     assetClass: "equity",
+    currency: "USD",
   };
 }
 

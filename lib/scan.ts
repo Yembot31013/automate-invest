@@ -15,7 +15,7 @@ import {
   isSharpDip,
   MarketDataError,
 } from "@/lib/market";
-import { isCryptoPair } from "@/lib/symbols";
+import { isCryptoPair, isNgxExchange } from "@/lib/symbols";
 import { markAlertSent, wasAlertedRecently } from "@/lib/redis";
 import type { AlertPayload, ScanResult, WatchlistEntry } from "@/types";
 
@@ -41,9 +41,11 @@ async function evaluateSymbol(
   const skipped: string[] = [];
 
   const [series, sentiment, headlines] = await Promise.all([
-    fetchDailyOhlc(symbol),
-    isCryptoPair(symbol) ? Promise.resolve(null) : fetchNewsSentiment(symbol),
-    fetchHeadlinesForSymbol(symbol, 2),
+    fetchDailyOhlc(symbol, undefined, exchange),
+    isCryptoPair(symbol) || isNgxExchange(exchange)
+      ? Promise.resolve(null)
+      : fetchNewsSentiment(symbol),
+    fetchHeadlinesForSymbol(symbol, 2, exchange),
   ]);
 
   if (!series.bars.length) {

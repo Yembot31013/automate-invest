@@ -45,7 +45,8 @@ export async function computeWhatIf(params: {
   quantity?: number;
   entryPrice?: number;
 }): Promise<WhatIfResult> {
-  const symbol = resolveSymbolInput(params.symbol).symbol;
+  const resolved = resolveSymbolInput(params.symbol);
+  const symbol = resolved.symbol;
   if (!symbol) {
     throw new Error("Symbol is required");
   }
@@ -71,7 +72,7 @@ export async function computeWhatIf(params: {
     40,
     Math.ceil((Date.now() - entryDay) / (1000 * 60 * 60 * 24)) + 5,
   );
-  const series = await fetchDailyOhlc(symbol, lookbackDays);
+  const series = await fetchDailyOhlc(symbol, lookbackDays, resolved.exchange);
   if (!series.bars.length) {
     throw new Error(`No OHLC data for ${symbol}`);
   }

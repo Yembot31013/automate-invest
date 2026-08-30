@@ -8,7 +8,7 @@ import {
   isPromisingBreakout,
   isSharpDip,
 } from "@/lib/market";
-import { isCryptoPair } from "@/lib/symbols";
+import { isCryptoPair, isNgxExchange } from "@/lib/symbols";
 import type { Recommendation, WatchlistEntry } from "@/types";
 
 function scoreSnapshot(rec: Omit<Recommendation, "score">): number {
@@ -47,11 +47,11 @@ export async function recommendFromWatchlist(
   const batches = await mapPool(watchlist, 4, async (entry) => {
     try {
       const [series, sentiment, headlines] = await Promise.all([
-        fetchDailyOhlc(entry.symbol),
-        isCryptoPair(entry.symbol)
+        fetchDailyOhlc(entry.symbol, undefined, entry.exchange),
+        isCryptoPair(entry.symbol) || isNgxExchange(entry.exchange)
           ? Promise.resolve(null)
           : fetchNewsSentiment(entry.symbol),
-        fetchHeadlinesForSymbol(entry.symbol, 2),
+        fetchHeadlinesForSymbol(entry.symbol, 2, entry.exchange),
       ]);
       if (!series.bars.length) {
         return [] as Recommendation[];

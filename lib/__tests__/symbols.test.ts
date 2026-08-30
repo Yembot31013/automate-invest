@@ -17,18 +17,33 @@ describe("resolveSymbolInput", () => {
       symbol: "BTC/USD",
       exchange: "CRYPTO",
       assetClass: "crypto",
+      currency: "USD",
     });
     assert.equal(resolveSymbolInput("btc").symbol, "BTC/USD");
     assert.equal(resolveSymbolInput("BTCUSD").symbol, "BTC/USD");
     assert.equal(resolveSymbolInput("btc-usd").symbol, "BTC/USD");
   });
 
-  it("leaves equities alone", () => {
+  it("leaves US equities alone", () => {
     assert.deepEqual(resolveSymbolInput("AAPL"), {
       symbol: "AAPL",
       exchange: "NASDAQ",
       assetClass: "equity",
+      currency: "USD",
     });
+  });
+
+  it("maps NGX venue forms and Nigerian names", () => {
+    assert.deepEqual(resolveSymbolInput("NGX:DANGCEM"), {
+      symbol: "DANGCEM",
+      exchange: "NGX",
+      assetClass: "equity",
+      currency: "NGN",
+    });
+    assert.equal(resolveSymbolInput("gtco.ng").symbol, "GTCO");
+    assert.equal(resolveSymbolInput("dangote cement").exchange, "NGX");
+    assert.equal(resolveSymbolInput("ACCESS", "NGX").symbol, "ACCESS");
+    assert.equal(resolveSymbolInput("ACCESS").exchange, "NASDAQ");
   });
 });
 
@@ -38,6 +53,7 @@ describe("crypto helpers", () => {
     assert.equal(isCryptoPair("AAPL"), false);
     assert.equal(defaultExchangeForSymbol("ETH/USD"), "CRYPTO");
     assert.equal(defaultExchangeForSymbol("MSFT"), "NASDAQ");
+    assert.equal(defaultExchangeForSymbol("DANGCEM"), "NGX");
   });
 
   it("matches slash and compact forms", () => {

@@ -64,6 +64,18 @@ function formatUsd(value: number): string {
   }).format(value);
 }
 
+function formatTapePrice(value: number, exchange?: string): string {
+  const ex = exchange?.toUpperCase();
+  if (ex === "NGX" || ex === "NGN" || ex === "NSE") {
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+  return formatUsd(value);
+}
+
 /** Compact money for tight metric tiles ($100k, $1.2M) — avoids overflow. */
 function formatUsdCompact(value: number): string {
   const abs = Math.abs(value);
@@ -515,7 +527,7 @@ export function DeskShell() {
             <input
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
-              placeholder="NVDA"
+              placeholder="NVDA or DANGCEM"
               disabled={busyAdd || watchlistCount >= MAX_USER_WATCHLIST}
               aria-label="Ticker symbol to monitor"
               className="soft-field flex-1 !py-2"
@@ -797,7 +809,7 @@ export function DeskShell() {
 
         <p className="font-mono-label pt-2">Tape cards</p>
         <p className="text-[0.7rem] text-[var(--muted)]">
-          Tap a card for TradingView · Remove stays on the button.
+          Tap a card for chart · NGX uses desk + TradingView (NSENG) · Remove stays on the button.
         </p>
         {loading && snapshots.length === 0 ? (
           <div className="space-y-2" aria-busy="true">
@@ -852,7 +864,7 @@ export function DeskShell() {
                       </p>
                       <p className="mt-1 text-lg font-extrabold tabular-nums">
                         {snap.currentPrice != null
-                          ? formatUsd(snap.currentPrice)
+                          ? formatTapePrice(snap.currentPrice, snap.exchange)
                           : "—"}
                       </p>
                       <p className="text-xs font-semibold">
