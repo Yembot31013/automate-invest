@@ -25,6 +25,9 @@ function phaseFromState(state: string): DeedPhase {
 function pickSymbol(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
   const rec = input as Record<string, unknown>;
+  if (rec.sellAll === true) {
+    return "all";
+  }
   if (typeof rec.symbol === "string" && rec.symbol.trim()) {
     return rec.symbol.trim().toUpperCase();
   }
@@ -49,7 +52,8 @@ function toolOutputFailed(toolName: string, output: unknown): boolean {
     toolName === "monitorSymbol" ||
     toolName === "monitorSymbols" ||
     toolName === "paperBuy" ||
-    toolName === "paperSell"
+    toolName === "paperSell" ||
+    toolName === "paperSellMany"
   ) {
     return rec.ok === false;
   }
@@ -98,6 +102,11 @@ const DEED_COPY: Record<string, DeedCopy> = {
     running: "Closing a paper ticket…",
     done: "Paper sell filled",
     error: "Paper sell didn't go through",
+  },
+  paperSellMany: {
+    running: "Clearing paper tickets…",
+    done: "Paper sells filled",
+    error: "Paper sells didn't go through",
   },
   portfolioPnL: {
     running: "Marking the paper book…",

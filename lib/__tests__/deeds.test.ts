@@ -56,4 +56,16 @@ describe("deskDeedForTool", () => {
     assert.equal(deed.phase, "error");
     assert.match(deed.label, /Couldn't pin/i);
   });
+
+  it("maps paperSellMany deeds", () => {
+    const deed = deskDeedForTool({
+      toolName: "paperSellMany",
+      state: "output-available",
+      input: { sellAll: true },
+      output: { ok: true, closedCount: 4, remainingOpen: 0 },
+    });
+    assert.equal(deed.phase, "done");
+    assert.match(deed.label, /Paper sells/i);
+    assert.match(deed.label, /all/i);
+  });
 });

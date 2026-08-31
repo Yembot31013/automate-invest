@@ -7,7 +7,9 @@ import {
   type UIMessage,
 } from "ai";
 
+import { lastUserText } from "@/lib/agent/chat-text";
 import { buildDeskInstructions } from "@/lib/agent/prompt";
+import { requiresSnapshotFirst } from "@/lib/agent/snapshot-intent";
 import { createDeskTools } from "@/lib/agent/tools";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { logger } from "@/lib/logger";
@@ -68,6 +70,9 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { messages?: UIMessage[] };
     const messages = withUniqueMessageIds(body.messages ?? []);
     const watchlist = await getUserWatchlist(userId);
+    const tools = createDeskTools(userId);
+    const userText = lastUserText(messages);
+    const forceSnapshotFirst = requiresSnapshotFirst(userText);
 
     const result = streamText({
       model: google("gemini-2.5-pro"),
@@ -75,8 +80,21 @@ export async function POST(request: Request) {
         watchlistSymbols: watchlist.map((entry) => entry.symbol),
       }),
       messages: await convertToModelMessages(messages),
-      tools: createDeskTools(userId),
+      tools,
       stopWhen: isStepCount(8),
+      prepareStep: ({ stepNumber, steps }) => {
+        if (!forceSnapshotFirst || stepNumber > 0) return {};
+
+        const snapshotted = steps.some((step) =>
+          step.toolCalls.some((call) => call.toolName === "getSnapshot"),
+        );
+        if (snapshotted) return {};
+
+        return {
+          toolChoice: "required",
+          activeTools: ["getSnapshot"],
+        };
+      },
     });
 
     return result.toUIMessageStreamResponse({

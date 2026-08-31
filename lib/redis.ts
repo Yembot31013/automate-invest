@@ -64,17 +64,20 @@ function userWatchlistLockKey(userId: string): string {
   return `lock:user:${userId}:watchlist`;
 }
 
+function userPaperLockKey(userId: string): string {
+  return `lock:user:${userId}:paper`;
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Serialize watchlist writes — parallel tool calls otherwise race and drop symbols. */
-async function withUserWatchlistLock<T>(
-  userId: string,
+async function withUserLock<T>(
+  lockKey: string,
+  busyMessage: string,
   fn: () => Promise<T>,
 ): Promise<T> {
   const redis = getRedis();
-  const lockKey = userWatchlistLockKey(userId);
   const maxAttempts = 12;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -89,7 +92,31 @@ async function withUserWatchlistLock<T>(
     await sleep(35 + attempt * 25);
   }
 
-  throw new Error("Watchlist is busy — try again in a moment");
+  throw new Error(busyMessage);
+}
+
+/** Serialize watchlist writes — parallel tool calls otherwise race and drop symbols. */
+async function withUserWatchlistLock<T>(
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return withUserLock(
+    userWatchlistLockKey(userId),
+    "Watchlist is busy — try again in a moment",
+    fn,
+  );
+}
+
+/** Serialize paper book writes — parallel paperSell calls otherwise overwrite each other. */
+export async function withUserPaperLock<T>(
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return withUserLock(
+    userPaperLockKey(userId),
+    "Paper book is busy — try again in a moment",
+    fn,
+  );
 }
 
 export async function wasAlertedRecently(

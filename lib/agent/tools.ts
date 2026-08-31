@@ -14,6 +14,7 @@ import {
   loadSnapshot,
   paperBuy,
   paperSell,
+  paperSellMany,
 } from "@/lib/paper";
 import { recommendFromWatchlist } from "@/lib/recommend";
 import {
@@ -434,7 +435,7 @@ export function createDeskTools(userId: string) {
 
     paperSell: tool({
       description:
-        "Close an open paper position; proceeds return to paper cash. Call for sell / close / exit / flatten intents (e.g. “sell NVDA”, “close my bitcoin”). Resolve the symbol from context or live portfolio if they say “it” / “that”.",
+        "Close ONE open paper position; proceeds return to paper cash. Use for a single ticker (“sell NVDA”, “close my bitcoin”). For sell all / liquidate everything / close several names at once, use paperSellMany instead — do NOT fire many parallel paperSell calls.",
       inputSchema: z.object({
         symbol: z.string().optional(),
         positionId: z.string().optional(),
@@ -443,6 +444,7 @@ export function createDeskTools(userId: string) {
       execute: async (input) => {
         const position = await paperSell({ userId, ...input });
         return {
+          ok: true,
           id: position.id,
           symbol: position.symbol,
           exitPrice: position.exitPrice,
@@ -450,6 +452,40 @@ export function createDeskTools(userId: string) {
           unrealizedPnlPct: Number(position.unrealizedPnlPct.toFixed(2)),
           cashRemaining: Number(position.cashRemaining.toFixed(2)),
         };
+      },
+    }),
+
+    paperSellMany: tool({
+      description:
+        "Close multiple open paper positions in one atomic update. Use for “sell all”, “liquidate”, “close everything”, or selling several tickers at once. Prefer sellAll: true for flatten-the-book. Returns closedCount + remainingOpen — only claim flat when remainingOpen is 0.",
+      inputSchema: z.object({
+        sellAll: z
+          .boolean()
+          .optional()
+          .describe("If true, close every open paper position"),
+        symbols: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Specific tickers to close when not selling all, e.g. [\"NVDA\", \"BTC/USD\"]",
+          ),
+      }),
+      execute: async (input) => {
+        try {
+          return await paperSellMany({ userId, ...input });
+        } catch (error) {
+          return {
+            ok: false,
+            closedCount: 0,
+            closed: [],
+            cashRemaining: 0,
+            remainingOpen: -1,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not sell those paper positions",
+          };
+        }
       },
     }),
 

@@ -72,6 +72,7 @@ const DESK_MUTATING_TOOLS = new Set([
   "unmonitorSymbol",
   "paperBuy",
   "paperSell",
+  "paperSellMany",
 ]);
 
 function isToolDone(state: string): boolean {
@@ -97,6 +98,8 @@ function toolMutationSummary(toolName: string): string {
       return "Paper buy filled";
     case "paperSell":
       return "Paper sell filled";
+    case "paperSellMany":
+      return "Paper sells filled";
     default:
       return "Desk updated";
   }
@@ -396,7 +399,7 @@ function DeskChatSession({
             Sidekick chat
           </h2>
           <p className="mt-1 hidden text-sm text-[var(--muted)] sm:block">
-            Ask in plain English. Tools fetch real numbers — we never invent
+            Ask in plain English. Tools fetch real numbers. We never invent
             prices.
           </p>
         </div>
