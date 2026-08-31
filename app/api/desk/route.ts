@@ -6,6 +6,8 @@ import { DESK_SNAPSHOT_LIMIT } from "@/lib/limits";
 import { logger } from "@/lib/logger";
 import { getPortfolioSummary, loadSnapshot } from "@/lib/paper";
 import { getUserWatchlist } from "@/lib/redis";
+import { listUserTriggers } from "@/lib/triggers-store";
+import { MAX_USER_TRIGGERS } from "@/lib/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export async function GET() {
   try {
     const watchlist = await getUserWatchlist(userId);
     const portfolio = await getPortfolioSummary(userId);
+    const triggers = await listUserTriggers(userId);
 
     const snapshots = await mapPool(
       watchlist.slice(0, DESK_SNAPSHOT_LIMIT),
@@ -54,6 +57,8 @@ export async function GET() {
 
     return NextResponse.json({
       watchlist,
+      triggers,
+      triggerLimit: MAX_USER_TRIGGERS,
       snapshots,
       portfolio: {
         openCount: portfolio.openCount,

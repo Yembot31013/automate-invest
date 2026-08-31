@@ -3,10 +3,6 @@ import { MAX_USER_WATCHLIST } from "@/lib/limits";
 /** localStorage flag — once dismissed, first-visit tour stays off. */
 export const ONBOARDING_STORAGE_KEY = "signal-desk:onboarding:v1";
 
-export const DISCORD_INVITE_URL =
-  process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() ||
-  "https://discord.gg/MvUUvnTsN";
-
 export type OnboardingStep = {
   id: string;
   eyebrow: string;
@@ -42,12 +38,12 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     imageAlt: "Tape cards and charts floating above a desk",
   },
   {
-    id: "discord",
-    eyebrow: "Crew",
-    title: "Come hang with testers",
-    body: "Bugs, ideas, and tape talk live on Discord. Drop in anytime — early feedback shapes what we build next.",
+    id: "attention",
+    eyebrow: "Alerts",
+    title: "Attention mail + Auto",
+    body: "Scan alerts land in your email and as center chips in chat — friendly heads-ups that never trade. Auto-trade is opt-in: sells what you own, buys from your watchlist. It helps, it isn’t perfect, and you can turn it off anytime.",
     imageSrc: "/onboard-discord.png",
-    imageAlt: "Friendly clay figures and chat bubbles for community",
+    imageAlt: "Friendly clay figures and chat bubbles for alerts",
   },
 ];
 

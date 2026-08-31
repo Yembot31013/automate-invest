@@ -5,7 +5,6 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
-  DISCORD_INVITE_URL,
   ONBOARDING_STEPS,
   markOnboardingComplete,
 } from "@/lib/onboarding";
@@ -146,14 +145,6 @@ export function OnboardingModal({ open, onClose }: OnboardingModalProps) {
                 <button type="button" className="btn-ghost" onClick={goBack}>
                   Back
                 </button>
-                <a
-                  href={DISCORD_INVITE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-ghost"
-                >
-                  Join Discord
-                </a>
               </div>
             </div>
           ) : (

@@ -163,6 +163,31 @@ const DEED_COPY: Record<string, DeedCopy> = {
     done: "Board checked",
     error: "Couldn't read the board",
   },
+  getDeskAutomation: {
+    running: "Checking Auto / Attention…",
+    done: "Automation status checked",
+    error: "Couldn't read automation status",
+  },
+  listTriggers: {
+    running: "Checking your triggers…",
+    done: "Triggers checked",
+    error: "Couldn't read triggers",
+  },
+  createTrigger: {
+    running: "Arming a trigger…",
+    done: "Trigger armed",
+    error: "Couldn't create that trigger",
+  },
+  setTriggerEnabled: {
+    running: "Updating a trigger…",
+    done: "Trigger updated",
+    error: "Couldn't update that trigger",
+  },
+  removeTrigger: {
+    running: "Removing a trigger…",
+    done: "Trigger removed",
+    error: "Couldn't remove that trigger",
+  },
   monitorSymbol: {
     running: "Pinning to the board…",
     done: "Pinned to the watchlist",
@@ -260,6 +285,53 @@ function deedHint(params: {
       return count == null
         ? "Read your watchlist"
         : `Read your watchlist (${count} ticker${count === 1 ? "" : "s"})`;
+    }
+    case "getDeskAutomation": {
+      if (phase === "running") return "Checking Auto-trade and Attention mail";
+      if (phase === "error") return err ?? "Couldn't read automation status";
+      const on = outRec?.autoTradeEnabled === true;
+      return on
+        ? "Auto-trade is ON · Attention mail still used when unsure"
+        : "Auto-trade is OFF · Attention mail only";
+    }
+    case "listTriggers": {
+      if (phase === "running") return "Reading your triggers";
+      if (phase === "error") return err ?? "Couldn't read triggers";
+      const count = Array.isArray(outRec?.triggers)
+        ? outRec.triggers.length
+        : null;
+      return count == null
+        ? "Read your triggers"
+        : `Read your triggers (${count})`;
+    }
+    case "createTrigger": {
+      if (phase === "running") return "Arming a trigger";
+      if (phase === "error") return err ?? "Couldn't create trigger";
+      const summary =
+        typeof outRec?.summary === "string" ? outRec.summary : null;
+      return summary ? `Armed trigger · ${summary}` : "Armed a trigger";
+    }
+    case "setTriggerEnabled": {
+      if (phase === "running") return "Updating a trigger";
+      if (phase === "error") return err ?? "Couldn't update trigger";
+      const summary =
+        typeof outRec?.summary === "string" ? outRec.summary : null;
+      const enabled = outRec?.trigger && typeof outRec.trigger === "object"
+        ? (outRec.trigger as { enabled?: boolean }).enabled
+        : undefined;
+      if (summary) {
+        return enabled === false
+          ? `Paused trigger · ${summary}`
+          : `Enabled trigger · ${summary}`;
+      }
+      return "Updated a trigger";
+    }
+    case "removeTrigger": {
+      if (phase === "running") return "Removing a trigger";
+      if (phase === "error") return err ?? "Couldn't remove trigger";
+      const summary =
+        typeof outRec?.summary === "string" ? outRec.summary : null;
+      return summary ? `Removed trigger · ${summary}` : "Removed a trigger";
     }
     case "monitorSymbol": {
       const sym =

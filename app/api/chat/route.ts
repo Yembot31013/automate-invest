@@ -2,8 +2,10 @@ import { auth } from "@clerk/nextjs/server";
 import { google } from "@ai-sdk/google";
 import {
   convertToModelMessages,
+  createUIMessageStreamResponse,
   isStepCount,
   streamText,
+  toUIMessageStream,
   type UIMessage,
 } from "ai";
 
@@ -12,6 +14,8 @@ import { buildDeskInstructions } from "@/lib/agent/prompt";
 import { requiresSnapshotFirst } from "@/lib/agent/snapshot-intent";
 import { createDeskTools } from "@/lib/agent/tools";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
+import { withoutDeskEventMessages } from "@/lib/desk-events";
+import { getDeskSettings } from "@/lib/desk-settings-store";
 import { logger } from "@/lib/logger";
 import {
   clearChatMessages,
@@ -19,6 +23,8 @@ import {
   getUserWatchlist,
   saveChatMessages,
 } from "@/lib/redis";
+import { listUserTriggers } from "@/lib/triggers-store";
+import { formatTriggerSummary } from "@/lib/triggers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,16 +76,27 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { messages?: UIMessage[] };
     const messages = withUniqueMessageIds(body.messages ?? []);
     const watchlist = await getUserWatchlist(userId);
+    const deskSettings = await getDeskSettings(userId);
+    const triggers = await listUserTriggers(userId);
     const tools = createDeskTools(userId);
     const userText = lastUserText(messages);
     const forceSnapshotFirst = requiresSnapshotFirst(userText);
+    const modelMessages = withoutDeskEventMessages(messages);
+
+    const assistantCreatedAt = new Date().toISOString();
 
     const result = streamText({
       model: google("gemini-2.5-pro"),
       instructions: buildDeskInstructions({
         watchlistSymbols: watchlist.map((entry) => entry.symbol),
+        triggerSummaries: triggers.map(formatTriggerSummary),
+        autoTradeEnabled: deskSettings.autoTradeEnabled,
+        takeProfitPct: deskSettings.takeProfitPct,
+        stopLossPct: deskSettings.stopLossPct,
+        trailGivebackPct: deskSettings.trailGivebackPct,
+        allowAutoBuys: deskSettings.allowAutoBuys,
       }),
-      messages: await convertToModelMessages(messages),
+      messages: await convertToModelMessages(modelMessages),
       tools,
       stopWhen: isStepCount(8),
       prepareStep: ({ stepNumber, steps }) => {
@@ -97,21 +114,31 @@ export async function POST(request: Request) {
       },
     });
 
-    return result.toUIMessageStreamResponse({
-      originalMessages: messages,
-      onFinish: async ({ messages: nextMessages }) => {
-        try {
-          await saveChatMessages(
-            userId,
-            withUniqueMessageIds(nextMessages),
-          );
-        } catch (error) {
-          logger.error("api/chat", "persist failed", {
-            userId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
+    return createUIMessageStreamResponse({
+      stream: toUIMessageStream({
+        stream: result.stream,
+        tools,
+        originalMessages: messages,
+        messageMetadata: ({ part }) => {
+          if (part.type === "start" || part.type === "finish") {
+            return { createdAt: assistantCreatedAt };
+          }
+          return undefined;
+        },
+        onEnd: async ({ messages: nextMessages }) => {
+          try {
+            await saveChatMessages(
+              userId,
+              withUniqueMessageIds(nextMessages),
+            );
+          } catch (error) {
+            logger.error("api/chat", "persist failed", {
+              userId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        },
+      }),
     });
   } catch (error) {
     const message =

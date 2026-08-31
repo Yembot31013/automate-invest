@@ -22,13 +22,31 @@ import {
   getUserWatchlist,
   removeFromUserWatchlist,
 } from "@/lib/redis";
+import { getDeskSettings } from "@/lib/desk-settings-store";
+import {
+  AUTO_TRADE_DISCLAIMER,
+  AUTO_TRADE_QUIZ_VERSION,
+} from "@/lib/desk-settings";
 import { sendCapabilityGapEmail } from "@/lib/email/resend";
-import { MAX_USER_WATCHLIST } from "@/lib/limits";
+import { MAX_USER_TRIGGERS, MAX_USER_WATCHLIST } from "@/lib/limits";
 import {
   findWatchlistSymbol,
   resolveSymbolInput,
 } from "@/lib/symbols";
 import { computeWhatIf } from "@/lib/whatif";
+import {
+  createUserTrigger,
+  listUserTriggers,
+  removeUserTrigger,
+  setUserTriggerEnabled,
+} from "@/lib/triggers-store";
+import {
+  formatTriggerSummary,
+  normalizeNotionalUsd,
+  TriggerLimitError,
+  type TriggerAction,
+  type TriggerConditionKind,
+} from "@/lib/triggers";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
   return {
@@ -157,6 +175,182 @@ export function createDeskTools(userId: string) {
         return {
           watchlist,
           symbols: watchlist.map((entry) => entry.symbol),
+        };
+      },
+    }),
+
+    getDeskAutomation: tool({
+      description:
+        "Read Attention vs Auto-trade status, plus a summary of user Triggers. Call when the user asks about auto trading, Attention mail, triggers/alerts rules, why something did or didn't sell, Discord alerts, or how automation works. You cannot enable/disable Auto from tools — point them to the Activity Auto toggle + quiz. For Triggers, use listTriggers / createTrigger / setTriggerEnabled / removeTrigger.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const [settings, triggers] = await Promise.all([
+          getDeskSettings(userId),
+          listUserTriggers(userId),
+        ]);
+        return {
+          attentionMail:
+            "Personalized email + chat system chip. Never trades. Default for scan alerts.",
+          autoTradeEnabled: settings.autoTradeEnabled,
+          autoTradeEnabledAt: settings.autoTradeEnabledAt,
+          quizVersionRequired: AUTO_TRADE_QUIZ_VERSION,
+          quizVersionAcked: settings.autoTradeQuizVersion,
+          exits:
+            "Paper sell owned positions (stop-loss / take-profit with trail giveback).",
+          entries: settings.allowAutoBuys
+            ? "Paper buy from your watchlist when dip rules fire (not the whole market)."
+            : "Watchlist auto-buys are off in settings.",
+          takeProfitPct: settings.takeProfitPct,
+          stopLossPct: settings.stopLossPct,
+          trailGivebackPct: settings.trailGivebackPct,
+          maxBuyNotionalUsd: settings.maxBuyNotionalUsd,
+          maxBuysPerDay: settings.maxBuysPerDay,
+          howToEnable:
+            "Activity panel → Auto-trade → agree + short quiz (again after every disable).",
+          expectation:
+            "Auto helps and usually works, but it isn’t perfect — misreads and second-guessable calls can happen; user owns leaving it on.",
+          disclaimerSummary: AUTO_TRADE_DISCLAIMER,
+          discordAlerts: false,
+          triggers: {
+            count: triggers.length,
+            limit: MAX_USER_TRIGGERS,
+            enabled: triggers.filter((t) => t.enabled).length,
+            summaries: triggers.map(formatTriggerSummary),
+            note: "User-defined rules checked on cron/scan (day % or price). Separate from Auto-trade dip/breakout system rules.",
+          },
+        };
+      },
+    }),
+
+    listTriggers: tool({
+      description:
+        "List the user's Triggers (custom day-move or price rules with alert / paper buy / paper sell). Call when they ask what rules are armed, or before editing triggers.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const triggers = await listUserTriggers(userId);
+        return {
+          triggers,
+          limit: MAX_USER_TRIGGERS,
+          summaries: triggers.map(formatTriggerSummary),
+        };
+      },
+    }),
+
+    createTrigger: tool({
+      description:
+        "Create a user Trigger checked on cron/scan. Examples: buy GOOG when day drop hits 3% (day_drop_pct + paper_buy), alert when AAPL ≤ 180 (price_below + attention), sell TSLA on a +5% day (day_gain_pct + paper_sell). Max " +
+        String(MAX_USER_TRIGGERS) +
+        ". Does NOT require Auto-trade to be on. Always call when they clearly want a standing rule.",
+      inputSchema: z.object({
+        symbol: z.string().describe("Ticker, e.g. GOOG, NVDA, BTC/USD"),
+        exchange: z.string().optional(),
+        conditionKind: z
+          .enum([
+            "day_drop_pct",
+            "day_gain_pct",
+            "price_below",
+            "price_above",
+          ])
+          .describe(
+            "day_drop_pct: changePct ≤ −value; day_gain_pct: ≥ +value; price_below/above: absolute mark",
+          ),
+        value: z
+          .number()
+          .positive()
+          .describe("Percent points (3 = 3%) or absolute price"),
+        action: z
+          .enum(["attention", "paper_buy", "paper_sell"])
+          .describe(
+            "attention = email + chat chip only; paper_buy / paper_sell = paper book",
+          ),
+        notionalUsd: z
+          .number()
+          .positive()
+          .optional()
+          .describe("Paper-buy budget in USD (default 1000, max 5000)"),
+      }),
+      execute: async ({
+        symbol,
+        exchange,
+        conditionKind,
+        value,
+        action,
+        notionalUsd,
+      }) => {
+        try {
+          const verified = await verifyTradableSymbolDetailed(symbol, exchange);
+          const trigger = await createUserTrigger(userId, {
+            symbol: verified.symbol,
+            exchange: verified.exchange,
+            condition: {
+              kind: conditionKind as TriggerConditionKind,
+              value,
+            },
+            action: action as TriggerAction,
+            notionalUsd: normalizeNotionalUsd(notionalUsd),
+          });
+          const triggers = await listUserTriggers(userId);
+          return {
+            ok: true,
+            trigger,
+            summary: formatTriggerSummary(trigger),
+            triggers,
+            limit: MAX_USER_TRIGGERS,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error ? error.message : "Couldn't create trigger",
+            limitHit: error instanceof TriggerLimitError,
+          };
+        }
+      },
+    }),
+
+    setTriggerEnabled: tool({
+      description:
+        "Enable or disable an existing Trigger by id (from listTriggers). Use when they say pause/turn off/arm a rule.",
+      inputSchema: z.object({
+        triggerId: z.string(),
+        enabled: z.boolean(),
+      }),
+      execute: async ({ triggerId, enabled }) => {
+        const trigger = await setUserTriggerEnabled(
+          userId,
+          triggerId,
+          enabled,
+        );
+        if (!trigger) {
+          return { ok: false, error: "Trigger not found" };
+        }
+        return {
+          ok: true,
+          trigger,
+          summary: formatTriggerSummary(trigger),
+        };
+      },
+    }),
+
+    removeTrigger: tool({
+      description:
+        "Delete a Trigger by id (from listTriggers). Permanent remove — use setTriggerEnabled to pause instead when they only want it off for now.",
+      inputSchema: z.object({
+        triggerId: z.string(),
+      }),
+      execute: async ({ triggerId }) => {
+        const { removed, triggers } = await removeUserTrigger(
+          userId,
+          triggerId,
+        );
+        if (!removed) {
+          return { ok: false, error: "Trigger not found" };
+        }
+        return {
+          ok: true,
+          removed,
+          summary: formatTriggerSummary(removed),
+          triggers,
         };
       },
     }),

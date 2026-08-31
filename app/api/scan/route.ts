@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 /**
  * Authenticated on-demand scan for the signed-in user's watchlist.
- * Posts to Discord when rules fire (same suppression as cron).
+ * Sends personalized Attention mail (+ Auto when enabled).
  */
 export async function POST() {
   const { userId } = await auth();
@@ -31,7 +31,10 @@ export async function POST() {
       );
     }
 
-    const result = await runMarketScan(watchlist, { postDiscord: true });
+    const result = await runMarketScan(watchlist, {
+      userId,
+      notify: true,
+    });
     logger.info("api/scan", "user scan completed", { userId, ...result });
     return NextResponse.json({
       ok: true,

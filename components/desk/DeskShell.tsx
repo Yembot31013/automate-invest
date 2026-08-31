@@ -10,6 +10,8 @@ import {
 import { Sparkline } from "@/components/desk/Sparkline";
 import { TradingViewModal } from "@/components/desk/TradingViewModal";
 import { OnboardingModal } from "@/components/desk/OnboardingModal";
+import { AutoTradeEnableModal } from "@/components/desk/AutoTradeEnableModal";
+import { DeskAddModal } from "@/components/desk/DeskAddModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import {
   BusyBanner,
@@ -20,8 +22,16 @@ import {
   type ToastState,
 } from "@/components/ui/Feedback";
 import { Tip } from "@/components/ui/Tip";
-import { MAX_USER_WATCHLIST } from "@/lib/limits";
+import type { DeskSettings } from "@/lib/desk-settings";
+import { MAX_USER_TRIGGERS, MAX_USER_WATCHLIST } from "@/lib/limits";
 import { hasCompletedOnboarding } from "@/lib/onboarding";
+import {
+  formatTriggerAction,
+  formatTriggerCondition,
+  type DeskTrigger,
+  type TriggerAction,
+  type TriggerConditionKind,
+} from "@/lib/triggers";
 
 type DeskSnapshot = {
   symbol: string;
@@ -132,7 +142,10 @@ export function DeskShell() {
   const [snapshots, setSnapshots] = useState<DeskSnapshot[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioPayload | null>(null);
   const [watchlistCount, setWatchlistCount] = useState(0);
-  const [symbolInput, setSymbolInput] = useState("");
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addModalTab, setAddModalTab] = useState<"watchlist" | "trigger">(
+    "watchlist",
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyAdd, setBusyAdd] = useState(false);
@@ -157,8 +170,40 @@ export function DeskShell() {
   const [sidekickSyncing, setSidekickSyncing] = useState(false);
   const [sidekickDeed, setSidekickDeed] = useState<string | null>(null);
   const [composerFocusKey, setComposerFocusKey] = useState(0);
+  const [chatRefreshKey, setChatRefreshKey] = useState(0);
+  const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
+  const [autoTradeModalOpen, setAutoTradeModalOpen] = useState(false);
+  const [autoTradeBusy, setAutoTradeBusy] = useState(false);
+  const [autoTradeError, setAutoTradeError] = useState<string | null>(null);
+  const [confirmDisableAuto, setConfirmDisableAuto] = useState(false);
+  const [triggers, setTriggers] = useState<DeskTrigger[]>([]);
+  const [triggerLimit, setTriggerLimit] = useState(MAX_USER_TRIGGERS);
+  const [busyTrigger, setBusyTrigger] = useState<string | null>(null);
+  const [pendingRemoveTrigger, setPendingRemoveTrigger] =
+    useState<DeskTrigger | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const bumpChatRefresh = useCallback(() => {
+    setChatRefreshKey((k) => k + 1);
+  }, []);
+
+  const loadDeskSettings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/desk/settings", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { settings?: DeskSettings };
+      if (data.settings) {
+        setAutoTradeEnabled(Boolean(data.settings.autoTradeEnabled));
+      }
+    } catch {
+      // keep prior
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDeskSettings();
+  }, [loadDeskSettings]);
 
   const showToast = useCallback((next: NonNullable<ToastState>) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -207,10 +252,16 @@ export function DeskShell() {
           snapshots: DeskSnapshot[];
           portfolio: PortfolioPayload;
           watchlist?: Array<{ symbol: string }>;
+          triggers?: DeskTrigger[];
+          triggerLimit?: number;
         };
         setSnapshots(data.snapshots ?? []);
         setPortfolio(data.portfolio ?? null);
         setWatchlistCount(data.watchlist?.length ?? data.snapshots?.length ?? 0);
+        setTriggers(data.triggers ?? []);
+        if (typeof data.triggerLimit === "number") {
+          setTriggerLimit(data.triggerLimit);
+        }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to load desk";
@@ -259,16 +310,13 @@ export function DeskShell() {
     void refresh({ quiet: true });
   }, [refresh]);
 
-  async function addSymbol(e: React.FormEvent) {
-    e.preventDefault();
-    const symbol = symbolInput.trim().toUpperCase();
-    if (!symbol) return;
+  async function addSymbol(
+    symbolRaw: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const symbol = symbolRaw.trim().toUpperCase();
+    if (!symbol) return { ok: false, error: "Enter a ticker first." };
     setBusyAdd(true);
     setError(null);
-    showToast({
-      kind: "busy",
-      message: `Checking ${symbol} is a real ticker… hang tight.`,
-    });
     try {
       const res = await fetch("/api/watchlist", {
         method: "POST",
@@ -284,21 +332,17 @@ export function DeskShell() {
         throw new Error(data.error ?? "Failed to add symbol");
       }
       const added = data.symbol ?? symbol;
-      setSymbolInput("");
       setActivityLog((prev) => [`Monitored ${added}`, ...prev].slice(0, 12));
       showToast({
         kind: "ok",
         message: `${added} is on your watchlist. Nice.`,
       });
       await refresh({ quiet: true });
+      return { ok: true };
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to add symbol";
-      setError(message);
-      showToast({
-        kind: "warn",
-        message: `Couldn't add that ticker — nothing was saved. ${message}`,
-      });
+      return { ok: false, error: message };
     } finally {
       setBusyAdd(false);
     }
@@ -346,7 +390,9 @@ export function DeskShell() {
     setError(null);
     showToast({
       kind: "busy",
-      message: "Scanning your watchlist & pinging Discord…",
+      message: autoTradeEnabled
+        ? "Scanning your board · Attention + Auto…"
+        : "Scanning your board · Attention mail…",
     });
     try {
       const res = await fetch("/api/scan", { method: "POST" });
@@ -366,6 +412,7 @@ export function DeskShell() {
         kind: "ok",
         message: `Scan done — checked ${data.scanned ?? 0}, alerted ${(data.alerted ?? []).length}.`,
       });
+      bumpChatRefresh();
       await refresh({ quiet: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Scan failed";
@@ -376,15 +423,191 @@ export function DeskShell() {
     }
   }
 
+  async function enableAutoTrade(payload: {
+    agreed: boolean;
+    quizAnswers: Record<string, string>;
+  }): Promise<boolean> {
+    setAutoTradeBusy(true);
+    setAutoTradeError(null);
+    try {
+      const res = await fetch("/api/desk/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "enable",
+          agreed: payload.agreed,
+          quizAnswers: payload.quizAnswers,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        settings?: DeskSettings;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? "Couldn't enable Auto-trade");
+      }
+      setAutoTradeEnabled(true);
+      bumpChatRefresh();
+      setActivityLog((prev) => ["Auto-trade enabled", ...prev].slice(0, 12));
+      return true;
+    } catch (err) {
+      setAutoTradeError(
+        err instanceof Error ? err.message : "Couldn't enable Auto-trade",
+      );
+      return false;
+    } finally {
+      setAutoTradeBusy(false);
+    }
+  }
+
+  async function disableAutoTrade() {
+    setAutoTradeBusy(true);
+    try {
+      const res = await fetch("/api/desk/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disable" }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? "Couldn't disable Auto-trade");
+      }
+      setAutoTradeEnabled(false);
+      setConfirmDisableAuto(false);
+      bumpChatRefresh();
+      showToast({
+        kind: "ok",
+        message: "Auto-trade off — Attention mail still watches your board.",
+      });
+      setActivityLog((prev) => ["Auto-trade disabled", ...prev].slice(0, 12));
+    } catch (err) {
+      showToast({
+        kind: "warn",
+        message:
+          err instanceof Error ? err.message : "Couldn't disable Auto-trade",
+      });
+    } finally {
+      setAutoTradeBusy(false);
+    }
+  }
+
+  async function createTrigger(input: {
+    symbol: string;
+    conditionKind: TriggerConditionKind;
+    value: number;
+    action: TriggerAction;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const symbol = input.symbol.trim().toUpperCase();
+    if (!symbol) return { ok: false, error: "Enter a ticker first." };
+    if (!Number.isFinite(input.value) || input.value <= 0) {
+      return { ok: false, error: "Threshold must be a positive number." };
+    }
+    setBusyTrigger("create");
+    try {
+      const res = await fetch("/api/triggers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          condition: { kind: input.conditionKind, value: input.value },
+          action: input.action,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        triggers?: DeskTrigger[];
+      };
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error ?? "Couldn't create trigger");
+      }
+      setTriggers(data.triggers ?? []);
+      bumpChatRefresh();
+      showToast({ kind: "ok", message: `Trigger set for ${symbol}` });
+      setActivityLog((prev) => [`Trigger · ${symbol}`, ...prev].slice(0, 12));
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          err instanceof Error ? err.message : "Couldn't create trigger",
+      };
+    } finally {
+      setBusyTrigger(null);
+    }
+  }
+
+  async function toggleTrigger(id: string, enabled: boolean) {
+    setBusyTrigger(id);
+    try {
+      const res = await fetch("/api/triggers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, enabled }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        triggers?: DeskTrigger[];
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? "Couldn't update trigger");
+      }
+      setTriggers(data.triggers ?? []);
+      bumpChatRefresh();
+    } catch (err) {
+      showToast({
+        kind: "warn",
+        message: err instanceof Error ? err.message : "Couldn't update trigger",
+      });
+    } finally {
+      setBusyTrigger(null);
+    }
+  }
+
+  async function removeTrigger(id: string) {
+    setBusyTrigger(id);
+    try {
+      const res = await fetch(`/api/triggers?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        triggers?: DeskTrigger[];
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error ?? "Couldn't remove trigger");
+      }
+      setTriggers(data.triggers ?? []);
+      setPendingRemoveTrigger(null);
+      bumpChatRefresh();
+      showToast({ kind: "ok", message: "Trigger removed" });
+    } catch (err) {
+      showToast({
+        kind: "warn",
+        message: err instanceof Error ? err.message : "Couldn't remove trigger",
+      });
+    } finally {
+      setBusyTrigger(null);
+    }
+  }
+
   const pnlPositive = (portfolio?.totalUnrealizedPnl ?? 0) >= 0;
-  const anyBusy = busyAdd || busyRemove != null || busyScan || refreshing;
+  const anyBusy =
+    busyAdd ||
+    busyRemove != null ||
+    busyScan ||
+    refreshing ||
+    busyTrigger != null;
 
   const sidebar = (
     <aside
       className={`soft-card-strong flex h-full flex-col overflow-hidden ${busyAdd ? "ring-2 ring-[var(--blue)]/30" : ""}`}
       aria-busy={busyAdd || busyRemove != null}
     >
-      <div className="border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-4 py-4">
+      <div className="shrink-0 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-4 py-4">
         <p className="font-mono-label">Agents</p>
         <h1 className="mt-1 text-xl font-extrabold tracking-tight text-[var(--ink)]">
           Signal Desk
@@ -394,7 +617,7 @@ export function DeskShell() {
         </p>
       </div>
 
-      <div className="space-y-2 overflow-y-auto px-3 py-3">
+      <div className="shrink-0 space-y-2 border-b border-[color-mix(in_srgb,var(--mix)_50%,transparent)] px-3 py-3">
         <Tip
           label="Jump to chat with your loyal market pal"
           className="w-full"
@@ -424,8 +647,10 @@ export function DeskShell() {
             </span>
           </button>
         </Tip>
+      </div>
 
-        <p className="font-mono-label px-1 pt-3">Watchlist</p>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+        <p className="font-mono-label px-1">Watchlist</p>
         {loading && snapshots.length === 0 ? (
           <div className="space-y-2 px-1" aria-busy="true" aria-label="Loading watchlist">
             <Skeleton lines={3} />
@@ -437,7 +662,7 @@ export function DeskShell() {
         ) : snapshots.length === 0 ? (
           <EmptyHint
             title="Empty list"
-            body="Type a ticker below (like NVDA) and hit Add. We'll verify it before saving."
+            body="Tap Add below to pin a ticker. We'll verify it before saving."
           />
         ) : (
           snapshots.map((snap, i) => (
@@ -504,65 +729,89 @@ export function DeskShell() {
             </div>
           ))
         )}
+
+        <p className="font-mono-label px-1 pt-3">Triggers</p>
+        <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">
+          {triggers.length}/{triggerLimit} · cron checks these on scan
+        </p>
+        {triggers.length === 0 ? (
+          <EmptyHint
+            title="No triggers yet"
+            body="Tap Add below to arm a rule — e.g. GOOG day drop 3% → alert or paper buy."
+          />
+        ) : (
+          triggers.map((trg) => (
+            <div
+              key={trg.id}
+              className={`tilt-hover soft-card desk-trigger-row ${
+                !trg.enabled ? "opacity-60" : ""
+              } ${busyTrigger === trg.id ? "opacity-70" : ""}`}
+            >
+              <div className="desk-trigger-copy">
+                <span className="desk-trigger-symbol">{trg.symbol}</span>
+                <span className="desk-trigger-meta">
+                  {formatTriggerCondition(trg.condition)} ·{" "}
+                  {formatTriggerAction(trg.action)}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={trg.enabled}
+                aria-label={`${trg.enabled ? "Disable" : "Enable"} trigger ${trg.symbol}`}
+                disabled={busyTrigger === trg.id}
+                className={`desk-switch shrink-0 ${trg.enabled ? "is-on" : ""}`}
+                onClick={() => {
+                  void toggleTrigger(trg.id, !trg.enabled);
+                }}
+              >
+                <span className="desk-switch-knob" aria-hidden="true" />
+              </button>
+              <Tip label={`Remove ${trg.symbol} trigger`}>
+                <button
+                  type="button"
+                  aria-label={`Remove ${trg.symbol} trigger`}
+                  disabled={busyTrigger === trg.id}
+                  onClick={() => setPendingRemoveTrigger(trg)}
+                  className="shrink-0 rounded-full px-2 py-1 text-xs font-bold text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--orange)_28%,var(--mix))] hover:text-[var(--ink)] disabled:opacity-50"
+                >
+                  {busyTrigger === trg.id ? (
+                    <Spinner size="sm" label="Updating trigger" />
+                  ) : (
+                    "×"
+                  )}
+                </button>
+              </Tip>
+            </div>
+          ))
+        )}
       </div>
 
-      <form
-        onSubmit={addSymbol}
-        className="mt-auto space-y-2 border-t border-[color-mix(in_srgb,var(--mix)_50%,transparent)] p-3"
-      >
-        <p className="font-mono-label">Add ticker</p>
-        <p className="text-[0.7rem] leading-snug text-[var(--muted)]">
-          {watchlistCount}/{MAX_USER_WATCHLIST} slots · we verify before saving
+      <div className="mt-auto shrink-0 space-y-2 border-t border-[color-mix(in_srgb,var(--mix)_50%,transparent)] p-3">
+        <Tip
+          label="Add a watchlist ticker or arm a trigger"
+          className="w-full"
+          as="div"
+        >
+          <button
+            type="button"
+            className="btn-primary w-full !py-2.5 text-sm"
+            onClick={() => {
+              setAddModalTab(
+                snapshots.length === 0 && triggers.length > 0
+                  ? "trigger"
+                  : "watchlist",
+              );
+              setAddModalOpen(true);
+            }}
+          >
+            Add
+          </button>
+        </Tip>
+        <p className="text-center text-[0.68rem] leading-snug text-[var(--muted)]">
+          Watchlist {watchlistCount}/{MAX_USER_WATCHLIST} · Triggers{" "}
+          {triggers.length}/{triggerLimit}
         </p>
-        <div className="flex gap-2">
-          <Tip
-            label="Stock ticker or crypto pair (allowlist)"
-            className="min-w-0 flex-1"
-            as="div"
-            side="top"
-          >
-            <input
-              value={symbolInput}
-              onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
-              placeholder="NVDA or DANGCEM"
-              disabled={busyAdd || watchlistCount >= MAX_USER_WATCHLIST}
-              aria-label="Ticker symbol to monitor"
-              className="soft-field flex-1 !py-2"
-            />
-          </Tip>
-          <Tip
-            label={
-              watchlistCount >= MAX_USER_WATCHLIST
-                ? `Watchlist full (${MAX_USER_WATCHLIST}). Remove one first.`
-                : "Verify this ticker and add it to your watchlist"
-            }
-          >
-            <button
-              type="submit"
-              disabled={
-                busyAdd ||
-                !symbolInput.trim() ||
-                watchlistCount >= MAX_USER_WATCHLIST
-              }
-              className="btn-primary !px-3 !py-2 text-xs"
-            >
-              {busyAdd ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <Spinner size="sm" label="Adding" />
-                  Check
-                </span>
-              ) : (
-                "Add"
-              )}
-            </button>
-          </Tip>
-        </div>
-        {busyAdd && (
-          <BusyBanner
-            active
-            message={`Verifying ${symbolInput.trim().toUpperCase() || "ticker"} — almost there…`}
-          />
-        )}
         {error && (
           <p
             className="rounded-[14px] bg-[color-mix(in_srgb,var(--orange)_28%,var(--mix))] px-2 py-1.5 text-xs leading-snug"
@@ -571,7 +820,7 @@ export function DeskShell() {
             {error}
           </p>
         )}
-      </form>
+      </div>
     </aside>
   );
 
@@ -600,7 +849,7 @@ export function DeskShell() {
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Tip label="Run dip/breakout rules on your list and post Discord alerts">
+          <Tip label="Run dip/breakout rules · Attention email + chat chip (Auto if enabled)">
             <button
               type="button"
               disabled={busyScan || loading}
@@ -615,6 +864,33 @@ export function DeskShell() {
               ) : (
                 "Scan now"
               )}
+            </button>
+          </Tip>
+          <Tip
+            label={
+              autoTradeEnabled
+                ? "Auto-trade is still on — exits on owned lots, buys from watchlist only. Click to turn off."
+                : "Turn on Auto-trade — sells what you own, buys from your watchlist. Short quiz first."
+            }
+          >
+            <button
+              type="button"
+              disabled={autoTradeBusy || loading}
+              onClick={() => {
+                setAutoTradeError(null);
+                if (autoTradeEnabled) {
+                  setConfirmDisableAuto(true);
+                } else {
+                  setAutoTradeModalOpen(true);
+                }
+              }}
+              className={`badge-pill !px-3 !py-1.5 text-xs font-bold ${
+                autoTradeEnabled
+                  ? "bg-[color-mix(in_srgb,var(--green)_35%,var(--mix))] text-[var(--ink)]"
+                  : "bg-[color-mix(in_srgb,var(--mix)_80%,transparent)] text-[var(--ink)]"
+              }`}
+            >
+              {autoTradeEnabled ? "Auto on" : "Auto-trade"}
             </button>
           </Tip>
           <Tip label="Reload prices, headlines, and paper PnL">
@@ -1048,6 +1324,7 @@ export function DeskShell() {
               externalPrompt={externalPrompt}
               onExternalPromptConsumed={() => setExternalPrompt(null)}
               focusSignal={composerFocusKey}
+              messagesRefreshSignal={chatRefreshKey}
               onPrompt={(text) =>
                 setActivityLog((prev) =>
                   [`Chat · ${text.slice(0, 48)}`, ...prev].slice(0, 12),
@@ -1078,6 +1355,52 @@ export function DeskShell() {
         onClose={() => setOnboardingOpen(false)}
       />
 
+      <DeskAddModal
+        open={addModalOpen}
+        busyWatchlist={busyAdd}
+        busyTrigger={busyTrigger === "create"}
+        watchlistCount={watchlistCount}
+        watchlistLimit={MAX_USER_WATCHLIST}
+        triggerCount={triggers.length}
+        triggerLimit={triggerLimit}
+        initialTab={addModalTab}
+        onClose={() => {
+          if (busyAdd || busyTrigger === "create") return;
+          setAddModalOpen(false);
+        }}
+        onAddWatchlist={addSymbol}
+        onAddTrigger={createTrigger}
+      />
+
+      <AutoTradeEnableModal
+        open={autoTradeModalOpen}
+        busy={autoTradeBusy}
+        error={autoTradeError}
+        onCancel={() => {
+          if (autoTradeBusy) return;
+          setAutoTradeModalOpen(false);
+          setAutoTradeError(null);
+        }}
+        onEnable={enableAutoTrade}
+      />
+
+      <ConfirmModal
+        open={confirmDisableAuto}
+        title="Turn off Auto-trade?"
+        body="Attention mail still watches your board. You'll need the quiz again if you re-enable later."
+        confirmLabel="Turn off"
+        cancelLabel="Keep Auto on"
+        tone="danger"
+        busy={autoTradeBusy}
+        onCancel={() => {
+          if (autoTradeBusy) return;
+          setConfirmDisableAuto(false);
+        }}
+        onConfirm={() => {
+          void disableAutoTrade();
+        }}
+      />
+
       <ConfirmModal
         open={pendingRemove != null}
         title={`Remove ${pendingRemove ?? "ticker"}?`}
@@ -1098,6 +1421,42 @@ export function DeskShell() {
         }}
         onConfirm={() => {
           if (pendingRemove) void removeSymbol(pendingRemove);
+        }}
+      />
+
+      <ConfirmModal
+        open={pendingRemoveTrigger != null}
+        title={`Remove ${pendingRemoveTrigger?.symbol ?? "trigger"} rule?`}
+        body={
+          <>
+            This deletes your{" "}
+            <strong>
+              {pendingRemoveTrigger
+                ? `${formatTriggerCondition(pendingRemoveTrigger.condition)} · ${formatTriggerAction(pendingRemoveTrigger.action)}`
+                : "trigger"}
+            </strong>{" "}
+            rule for <strong>{pendingRemoveTrigger?.symbol}</strong>. Cron
+            won&apos;t fire it anymore. You can arm a new one anytime.
+          </>
+        }
+        confirmLabel="Remove"
+        cancelLabel="Keep it"
+        tone="danger"
+        busy={
+          pendingRemoveTrigger != null &&
+          busyTrigger === pendingRemoveTrigger.id
+        }
+        onCancel={() => {
+          if (
+            pendingRemoveTrigger &&
+            busyTrigger === pendingRemoveTrigger.id
+          ) {
+            return;
+          }
+          setPendingRemoveTrigger(null);
+        }}
+        onConfirm={() => {
+          if (pendingRemoveTrigger) void removeTrigger(pendingRemoveTrigger.id);
         }}
       />
 

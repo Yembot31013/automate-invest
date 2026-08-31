@@ -6,5 +6,8 @@
 /** Max symbols a user may keep on their watchlist. */
 export const MAX_USER_WATCHLIST = 20;
 
+/** Max user-defined price/pct triggers per desk. */
+export const MAX_USER_TRIGGERS = 15;
+
 /** How many watchlist symbols get full tape snapshots per desk refresh. */
 export const DESK_SNAPSHOT_LIMIT = 12;

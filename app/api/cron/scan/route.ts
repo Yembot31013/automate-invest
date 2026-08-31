@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
   try {
     const watchlist = withDefaultWatchlist(await getSystemWatchlist());
-    const result = await runMarketScan(watchlist, { postDiscord: true });
+    const result = await runMarketScan(watchlist, { notify: true });
     logger.info("cron/scan", "completed", { ...result });
     return NextResponse.json({
       ok: true,

@@ -52,6 +52,30 @@ function userChatKey(userId: string): string {
   return `user:${userId}:chat:default`;
 }
 
+function userDeskSettingsKey(userId: string): string {
+  return `user:${userId}:desk-settings`;
+}
+
+function userTriggersKey(userId: string): string {
+  return `user:${userId}:triggers`;
+}
+
+function userTriggersLockKey(userId: string): string {
+  return `lock:user:${userId}:triggers`;
+}
+
+function symbolTriggerUsersKey(symbol: string): string {
+  return `symbol:${normalizeSymbol(symbol)}:trigger-users`;
+}
+
+function triggerFireKey(userId: string, triggerId: string): string {
+  return `trigger-fire:${userId}:${triggerId}`;
+}
+
+function userAutoBuyDayKey(userId: string, dayKey: string): string {
+  return `user:${userId}:auto-buys:${dayKey}`;
+}
+
 function symbolWatchersKey(symbol: string): string {
   return `symbol:${normalizeSymbol(symbol)}:watchers`;
 }
@@ -314,6 +338,177 @@ export async function saveChatMessages<T>(
 /** Wipe persisted sidekick thread for this user (watchlist/paper untouched). */
 export async function clearChatMessages(userId: string): Promise<void> {
   await getRedis().del(userChatKey(userId));
+}
+
+export async function getSymbolWatchers(symbol: string): Promise<string[]> {
+  const members = await getRedis().smembers(
+    symbolWatchersKey(normalizeSymbol(symbol)),
+  );
+  return members.filter((id) => typeof id === "string" && id.trim());
+}
+
+export async function getDeskSettingsRaw(
+  userId: string,
+): Promise<Record<string, unknown> | null> {
+  const raw = await getRedis().get<Record<string, unknown>>(
+    userDeskSettingsKey(userId),
+  );
+  if (!raw || typeof raw !== "object") return null;
+  return raw;
+}
+
+export async function saveDeskSettingsRaw(
+  userId: string,
+  settings: Record<string, unknown>,
+): Promise<void> {
+  await getRedis().set(userDeskSettingsKey(userId), settings);
+}
+
+/** Count auto-buys already taken this UTC day. */
+export async function getAutoBuyCountToday(userId: string): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const raw = await getRedis().get<number>(userAutoBuyDayKey(userId, day));
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+}
+
+export async function incrementAutoBuyCountToday(
+  userId: string,
+): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = userAutoBuyDayKey(userId, day);
+  const redis = getRedis();
+  const next = (await getAutoBuyCountToday(userId)) + 1;
+  await redis.set(key, next, { ex: 60 * 60 * 36 });
+  return next;
+}
+
+const TRIGGERS_COVERAGE_KEY = "triggers:coverage";
+
+export async function getUserTriggersRaw(
+  userId: string,
+): Promise<unknown[] | null> {
+  const raw = await getRedis().get<unknown[]>(userTriggersKey(userId));
+  if (!raw || !Array.isArray(raw)) return null;
+  return raw;
+}
+
+export async function saveUserTriggersRaw(
+  userId: string,
+  triggers: unknown[],
+): Promise<void> {
+  await getRedis().set(userTriggersKey(userId), triggers);
+}
+
+export async function withUserTriggersLock<T>(
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return withUserLock(
+    userTriggersLockKey(userId),
+    "Triggers are busy — try again in a moment",
+    fn,
+  );
+}
+
+export async function getTriggerCoverage(): Promise<WatchlistEntry[]> {
+  return readWatchlist(TRIGGERS_COVERAGE_KEY);
+}
+
+export async function saveTriggerCoverage(
+  list: WatchlistEntry[],
+): Promise<void> {
+  await writeWatchlist(TRIGGERS_COVERAGE_KEY, list);
+}
+
+export async function addSymbolTriggerUser(
+  symbol: string,
+  userId: string,
+  exchange: string,
+): Promise<void> {
+  const normalized = normalizeSymbol(symbol);
+  if (!normalized) return;
+  const redis = getRedis();
+  await redis.sadd(symbolTriggerUsersKey(normalized), userId);
+
+  const coverage = await getTriggerCoverage();
+  const exchangeLabel = exchange.trim().toUpperCase() || "NASDAQ";
+  if (!coverage.some((e) => e.symbol === normalized)) {
+    await saveTriggerCoverage([
+      ...coverage,
+      {
+        symbol: normalized,
+        exchange: exchangeLabel,
+        addedAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  // Ensure cron scans this symbol even if it's not on anyone's watchlist yet.
+  const system = await getSystemWatchlist();
+  if (!system.some((e) => e.symbol === normalized)) {
+    await writeWatchlist(SYSTEM_WATCHLIST_KEY, [
+      ...system,
+      {
+        symbol: normalized,
+        exchange: exchangeLabel,
+        addedAt: new Date().toISOString(),
+      },
+    ]);
+  }
+}
+
+export async function removeSymbolTriggerUserIfIdle(params: {
+  symbol: string;
+  userId: string;
+  stillActive: boolean;
+}): Promise<void> {
+  const normalized = normalizeSymbol(params.symbol);
+  if (!normalized) return;
+  const redis = getRedis();
+
+  if (params.stillActive) {
+    await redis.sadd(symbolTriggerUsersKey(normalized), params.userId);
+    return;
+  }
+
+  await redis.srem(symbolTriggerUsersKey(normalized), params.userId);
+  const remaining = await redis.smembers(symbolTriggerUsersKey(normalized));
+  if (remaining.length === 0) {
+    const coverage = await getTriggerCoverage();
+    await saveTriggerCoverage(
+      coverage.filter((e) => e.symbol !== normalized),
+    );
+  }
+}
+
+export async function getSymbolTriggerUsers(
+  symbol: string,
+): Promise<string[]> {
+  const members = await getRedis().smembers(
+    symbolTriggerUsersKey(normalizeSymbol(symbol)),
+  );
+  return members.filter((id) => typeof id === "string" && id.trim());
+}
+
+export async function wasTriggerFiredRecently(
+  userId: string,
+  triggerId: string,
+): Promise<boolean> {
+  const existing = await getRedis().get<string>(
+    triggerFireKey(userId, triggerId),
+  );
+  return existing !== null && existing !== undefined;
+}
+
+export async function markTriggerFired(
+  userId: string,
+  triggerId: string,
+): Promise<void> {
+  await getRedis().set(
+    triggerFireKey(userId, triggerId),
+    new Date().toISOString(),
+    { ex: ALERT_TTL_SECONDS },
+  );
 }
 
 export {

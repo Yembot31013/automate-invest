@@ -15,6 +15,11 @@ import { Tip } from "@/components/ui/Tip";
 import { MarkdownBubble } from "@/components/desk/MarkdownBubble";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { deskDeedForTool } from "@/lib/agent/deeds";
+import {
+  deskEventKind,
+  isDeskEventMessage,
+} from "@/lib/desk-events";
+import { formatChatTime, messageCreatedAt } from "@/lib/chat-time";
 
 export const CHAT_CHIPS = [
   {
@@ -64,6 +69,8 @@ type DeskChatProps = {
   onDeskMutated?: (summary: string) => void;
   /** Bump to focus the composer (e.g. Sidekick card click). */
   focusSignal?: number;
+  /** Bump to reload persisted messages (Attention / Auto chips). */
+  messagesRefreshSignal?: number;
 };
 
 const DESK_MUTATING_TOOLS = new Set([
@@ -112,6 +119,7 @@ export function DeskChat({
   onBusyChange,
   onDeskMutated,
   focusSignal,
+  messagesRefreshSignal,
 }: DeskChatProps) {
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -120,6 +128,7 @@ export function DeskChat({
   const [hydrated, setHydrated] = useState(false);
   const [seed, setSeed] = useState<UIMessage[]>([]);
   const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [sessionKey, setSessionKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +158,27 @@ export function DeskChat({
     };
   }, []);
 
+  useEffect(() => {
+    if (!messagesRefreshSignal) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/chat", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { messages?: UIMessage[] };
+        if (!cancelled && Array.isArray(data.messages)) {
+          setSeed(withUniqueMessageIds(data.messages));
+          setSessionKey((k) => k + 1);
+        }
+      } catch {
+        // keep current thread
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messagesRefreshSignal]);
+
   if (!hydrated) {
     return (
       <section
@@ -175,6 +205,7 @@ export function DeskChat({
 
   return (
     <DeskChatSession
+      key={sessionKey}
       transport={transport}
       initialMessages={seed}
       hydrateError={hydrateError}
@@ -218,6 +249,8 @@ function DeskChatSession({
   const [confirmClear, setConfirmClear] = useState(false);
   const [busyClear, setBusyClear] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<string | null>(null);
+  /** Bumps so relative timestamps stay fresh (now → 2 minutes ago). */
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const busy = status === "submitted" || status === "streaming";
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -229,6 +262,11 @@ function DeskChatSession({
   onDeskMutatedRef.current = onDeskMutated;
   const seenMutationsRef = useRef<Set<string>>(new Set());
   const pendingSyncRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   function focusComposer() {
     requestAnimationFrame(() => {
@@ -265,7 +303,10 @@ function DeskChatSession({
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     onPrompt?.(trimmed);
-    void sendMessage({ text: trimmed });
+    void sendMessage({
+      text: trimmed,
+      metadata: { createdAt: new Date().toISOString() },
+    });
     setInput("");
   }
 
@@ -487,16 +528,77 @@ function DeskChatSession({
             </p>
           </EmptyHint>
         )}
-        {messages.map((message, index) => (
+        {messages.map((message, index) => {
+          if (isDeskEventMessage(message)) {
+            const text = message.parts
+              .filter(
+                (part): part is Extract<(typeof message.parts)[number], { type: "text" }> =>
+                  part.type === "text",
+              )
+              .map((part) => part.text)
+              .join(" ")
+              .trim();
+            const createdAt = messageCreatedAt(message);
+            const kind = deskEventKind(message);
+            const timeLabel = createdAt
+              ? formatChatTime(createdAt, nowMs)
+              : null;
+            const absoluteLabel = createdAt
+              ? new Date(createdAt).toLocaleString()
+              : undefined;
+            return (
+              <div
+                key={message.id?.trim() || `desk-event-${index}`}
+                className="desk-system-row fade-up"
+              >
+                <div
+                  className={`desk-system-chip desk-system-${kind ?? "attention"}`}
+                  role="status"
+                >
+                  <span className="desk-system-text">{text}</span>
+                  {timeLabel ? (
+                    <time
+                      className="desk-system-time"
+                      dateTime={createdAt ?? undefined}
+                      title={absoluteLabel}
+                    >
+                      {timeLabel}
+                    </time>
+                  ) : null}
+                </div>
+              </div>
+            );
+          }
+
+          const createdAt = messageCreatedAt(message);
+          const timeLabel = createdAt
+            ? formatChatTime(createdAt, nowMs)
+            : null;
+          const absoluteLabel = createdAt
+            ? new Date(createdAt).toLocaleString()
+            : undefined;
+
+          return (
           <div
             key={message.id?.trim() || `msg-${index}-${message.role}`}
             className={
               message.role === "user" ? "bubble-user fade-up" : "bubble-assistant fade-up"
             }
           >
-            <p className="mb-1 font-mono-label">
-              {message.role === "user" ? "You" : "Signal Desk"}
-            </p>
+            <div className="desk-msg-meta">
+              <p className="font-mono-label">
+                {message.role === "user" ? "You" : "Signal Desk"}
+              </p>
+              {timeLabel ? (
+                <time
+                  className="desk-msg-time"
+                  dateTime={createdAt ?? undefined}
+                  title={absoluteLabel}
+                >
+                  {timeLabel}
+                </time>
+              ) : null}
+            </div>
             {message.parts.map((part, partIndex) => {
               if (part.type === "text") {
                 return (
@@ -550,7 +652,8 @@ function DeskChatSession({
               return null;
             })}
           </div>
-        ))}
+          );
+        })}
         {status === "submitted" && (
           <div className="thinking-bubble fade-up" aria-live="polite">
             <Spinner size="sm" label="Thinking" />
