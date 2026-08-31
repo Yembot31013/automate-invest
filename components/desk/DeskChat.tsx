@@ -531,7 +531,7 @@ function DeskChatSession({
                     <div
                       className={`desk-deed ${toneClass}`}
                       role="status"
-                      aria-label={deed.label}
+                      aria-label={deed.hint}
                     >
                       <span className="desk-deed-mark" aria-hidden="true">
                         {deed.phase === "running" ? (

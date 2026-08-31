@@ -1360,7 +1360,7 @@ div.tip-anchor {
   position: fixed;
   z-index: 10000;
   width: max-content;
-  max-width: min(320px, calc(100vw - 24px));
+  max-width: min(380px, calc(100vw - 24px));
   white-space: pre-line;
   padding: 0.5rem 0.75rem;
   border-radius: 12px;
