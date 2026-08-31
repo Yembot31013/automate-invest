@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 
 import { DeskSelect } from "@/components/ui/DeskSelect";
 import { Spinner } from "@/components/ui/Feedback";
-import type {
-  TriggerAction,
-  TriggerConditionKind,
+import {
+  DEFAULT_TRIGGER_NOTIONAL_USD,
+  MAX_TRIGGER_NOTIONAL_USD,
+  type TriggerAction,
+  type TriggerConditionKind,
 } from "@/lib/triggers";
 
 type DeskAddTab = "watchlist" | "trigger";
@@ -52,12 +54,12 @@ const ACTION_OPTIONS: Array<{
   {
     value: "paper_buy",
     label: "Paper buy",
-    hint: "Paper fill ~$1k when the rule hits",
+    hint: "Spend a set USD size when the rule hits",
   },
   {
     value: "paper_sell",
     label: "Paper sell",
-    hint: "Close open paper lots for that symbol",
+    hint: "Close all open paper lots for that symbol",
   },
 ];
 
@@ -69,6 +71,10 @@ type DeskAddModalProps = {
   watchlistLimit: number;
   triggerCount: number;
   triggerLimit: number;
+  /** Live paper cash — used to hint paper-buy affordability. */
+  paperCash?: number;
+  /** Open lot symbols — paper sell needs one of these. */
+  openSymbols?: string[];
   initialTab?: DeskAddTab;
   onClose: () => void;
   onAddWatchlist: (
@@ -79,6 +85,7 @@ type DeskAddModalProps = {
     conditionKind: TriggerConditionKind;
     value: number;
     action: TriggerAction;
+    notionalUsd?: number;
   }) => Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
@@ -91,6 +98,8 @@ export function DeskAddModal({
   watchlistLimit,
   triggerCount,
   triggerLimit,
+  paperCash,
+  openSymbols = [],
   initialTab = "watchlist",
   onClose,
   onAddWatchlist,
@@ -104,6 +113,9 @@ export function DeskAddModal({
   const [triggerValue, setTriggerValue] = useState("3");
   const [triggerAction, setTriggerAction] =
     useState<TriggerAction>("attention");
+  const [notionalUsd, setNotionalUsd] = useState(
+    String(DEFAULT_TRIGGER_NOTIONAL_USD),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
   const titleId = useId();
   const busy = busyWatchlist || busyTrigger;
@@ -119,6 +131,7 @@ export function DeskAddModal({
     setTriggerKind("day_drop_pct");
     setTriggerValue("3");
     setTriggerAction("attention");
+    setNotionalUsd(String(DEFAULT_TRIGGER_NOTIONAL_USD));
     setLocalError(null);
   }, [open, initialTab]);
 
@@ -140,6 +153,9 @@ export function DeskAddModal({
 
   const watchlistFull = watchlistCount >= watchlistLimit;
   const triggersFull = triggerCount >= triggerLimit;
+  const ownsSymbol = openSymbols.some(
+    (s) => s.toUpperCase() === symbol.trim().toUpperCase(),
+  );
 
   async function submitWatchlist(e: React.FormEvent) {
     e.preventDefault();
@@ -163,12 +179,20 @@ export function DeskAddModal({
     e.preventDefault();
     const next = symbol.trim().toUpperCase();
     const value = Number(triggerValue);
+    const size = Number(notionalUsd);
     if (!next) {
       setLocalError("Enter a ticker first.");
       return;
     }
     if (!Number.isFinite(value) || value <= 0) {
       setLocalError("Threshold must be a positive number.");
+      return;
+    }
+    if (
+      triggerAction === "paper_buy" &&
+      (!Number.isFinite(size) || size <= 0)
+    ) {
+      setLocalError("Enter a paper-buy size in USD.");
       return;
     }
     if (busyTrigger || triggersFull) return;
@@ -178,6 +202,8 @@ export function DeskAddModal({
       conditionKind: triggerKind,
       value,
       action: triggerAction,
+      notionalUsd:
+        triggerAction === "paper_buy" ? Math.round(size) : undefined,
     });
     if (result.ok) {
       setSymbol("");
@@ -346,6 +372,47 @@ export function DeskAddModal({
                 onChange={setTriggerAction}
               />
 
+              {triggerAction === "paper_buy" ? (
+                <>
+                  <label className="desk-add-label" htmlFor="desk-add-notional">
+                    Buy size (USD)
+                  </label>
+                  <input
+                    id="desk-add-notional"
+                    value={notionalUsd}
+                    onChange={(e) => {
+                      setNotionalUsd(e.target.value);
+                      if (localError) setLocalError(null);
+                    }}
+                    inputMode="numeric"
+                    placeholder={String(DEFAULT_TRIGGER_NOTIONAL_USD)}
+                    disabled={busyTrigger}
+                    className="soft-field"
+                  />
+                  <p className="desk-add-hint">
+                    $25–${MAX_TRIGGER_NOTIONAL_USD.toLocaleString()}
+                    {paperCash != null
+                      ? ` · cash on hand $${Math.floor(paperCash).toLocaleString()}`
+                      : ""}
+                  </p>
+                </>
+              ) : null}
+
+              {triggerAction === "paper_sell" ? (
+                <p
+                  className={
+                    symbol.trim() && !ownsSymbol
+                      ? "desk-add-warn"
+                      : "desk-add-hint"
+                  }
+                  role="status"
+                >
+                  {symbol.trim() && !ownsSymbol
+                    ? `No open lot in ${symbol.trim().toUpperCase()} — paper sell needs a holding.`
+                    : "Closes all open paper lots for this ticker when the rule hits."}
+                </p>
+              ) : null}
+
               <p className="desk-add-hint">
                 {triggerCount}/{triggerLimit} triggers · checked on cron / Scan
                 now
@@ -393,7 +460,8 @@ export function DeskAddModal({
                 busyTrigger ||
                 !symbol.trim() ||
                 triggersFull ||
-                !triggerValue.trim()
+                !triggerValue.trim() ||
+                (triggerAction === "paper_buy" && !notionalUsd.trim())
               }
             >
               {busyTrigger ? (

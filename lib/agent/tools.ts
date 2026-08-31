@@ -48,6 +48,11 @@ import {
   TriggerLimitError,
   type TriggerAction,
 } from "@/lib/triggers";
+import { loadTriggerBookContext } from "@/lib/trigger-sync";
+import {
+  validateTriggerCreate,
+  validateTriggerEnable,
+} from "@/lib/trigger-validate";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
   return {
@@ -239,7 +244,7 @@ export function createDeskTools(userId: string) {
 
     createTrigger: tool({
       description:
-        "Create a user Trigger (same rules as Add → Trigger in the sidebar). Conditions: day_drop_pct / day_gain_pct / price_below / price_above. Threshold value MUST be a positive magnitude — never 0. day_drop_pct value 3 = fire when day ≤ −3%; day_gain value 5 = day ≥ +5%. Vague asks like 'any negative', 'goes red', 'when it dips' are NOT value 0 — ask for a concrete % (1/2/3…) or propose one and wait for yes before calling. Examples: buy GOOG on −3% day → day_drop_pct + 3 + paper_buy; alert AAPL ≤ 180 → price_below + 180 + attention. Max " +
+        "Create a user Trigger (same rules as Add → Trigger). Conditions: day_drop_pct / day_gain_pct / price_below / price_above. Threshold MUST be positive (3 = −3% day for day_drop). Vague 'any negative' is NOT 0 — ask for a concrete %. paper_buy needs notionalUsd (25–5000) and enough paper cash; paper_sell requires an open lot in that symbol. Rejects duplicates and buy+sell conflicts on the same ticker. Max " +
         String(MAX_USER_TRIGGERS) +
         ". Does NOT require Auto-trade.",
       inputSchema: z.object({
@@ -269,7 +274,9 @@ export function createDeskTools(userId: string) {
           .number()
           .positive()
           .optional()
-          .describe("Paper-buy budget in USD (default 1000, max 5000)"),
+          .describe(
+            "Paper-buy size in USD (default 1000, max 5000). Required intent for paper_buy — pass the dollar budget they asked for.",
+          ),
       }),
       execute: async ({
         symbol,
@@ -292,12 +299,28 @@ export function createDeskTools(userId: string) {
         }
         try {
           const verified = await verifyTradableSymbolDetailed(symbol, exchange);
+          const size = normalizeNotionalUsd(notionalUsd);
+          const [existing, book] = await Promise.all([
+            listUserTriggers(userId),
+            loadTriggerBookContext(userId),
+          ]);
+          const readiness = validateTriggerCreate({
+            symbol: verified.symbol,
+            condition,
+            action: action as TriggerAction,
+            notionalUsd: size,
+            existing,
+            book,
+          });
+          if (!readiness.ok) {
+            return { ok: false, error: readiness.error, limitHit: false };
+          }
           const trigger = await createUserTrigger(userId, {
             symbol: verified.symbol,
             exchange: verified.exchange,
             condition,
             action: action as TriggerAction,
-            notionalUsd: normalizeNotionalUsd(notionalUsd),
+            notionalUsd: size,
           });
           const triggers = await listUserTriggers(userId);
           return {
@@ -320,12 +343,28 @@ export function createDeskTools(userId: string) {
 
     setTriggerEnabled: tool({
       description:
-        "Enable or disable an existing Trigger by id (from listTriggers). Use when they say pause/turn off/arm a rule.",
+        "Enable or disable an existing Trigger by id (from listTriggers). Enabling re-checks ownership (paper_sell), cash (paper_buy), and buy/sell conflicts.",
       inputSchema: z.object({
         triggerId: z.string(),
         enabled: z.boolean(),
       }),
       execute: async ({ triggerId, enabled }) => {
+        if (enabled) {
+          const existing = await listUserTriggers(userId);
+          const current = existing.find((t) => t.id === triggerId);
+          if (!current) {
+            return { ok: false, error: "Trigger not found" };
+          }
+          const book = await loadTriggerBookContext(userId);
+          const readiness = validateTriggerEnable({
+            trigger: current,
+            existing,
+            book,
+          });
+          if (!readiness.ok) {
+            return { ok: false, error: readiness.error };
+          }
+        }
         const trigger = await setUserTriggerEnabled(
           userId,
           triggerId,

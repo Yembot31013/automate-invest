@@ -232,8 +232,20 @@ export function formatTriggerAction(action: TriggerAction): string {
   }
 }
 
+function formatNotionalShort(usd: number): string {
+  if (usd >= 1000 && usd % 1000 === 0) return `$${usd / 1000}k`;
+  return `$${usd.toLocaleString()}`;
+}
+
+export function formatTriggerActionDetail(trigger: DeskTrigger): string {
+  if (trigger.action === "paper_buy") {
+    return `Paper buy ${formatNotionalShort(trigger.notionalUsd)}`;
+  }
+  return formatTriggerAction(trigger.action);
+}
+
 export function formatTriggerSummary(trigger: DeskTrigger): string {
-  return `${trigger.symbol} · ${formatTriggerCondition(trigger.condition)} · ${formatTriggerAction(trigger.action)}${trigger.enabled ? "" : " · off"}`;
+  return `${trigger.symbol} · ${formatTriggerCondition(trigger.condition)} · ${formatTriggerActionDetail(trigger)}${trigger.enabled ? "" : " · off"}`;
 }
 
 /** Merge watchlist + trigger coverage symbols (cron must scan trigger-only names). */

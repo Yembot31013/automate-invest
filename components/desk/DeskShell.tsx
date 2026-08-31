@@ -26,7 +26,7 @@ import type { DeskSettings } from "@/lib/desk-settings";
 import { MAX_USER_TRIGGERS, MAX_USER_WATCHLIST } from "@/lib/limits";
 import { hasCompletedOnboarding } from "@/lib/onboarding";
 import {
-  formatTriggerAction,
+  formatTriggerActionDetail,
   formatTriggerCondition,
   type DeskTrigger,
   type TriggerAction,
@@ -503,6 +503,7 @@ export function DeskShell() {
     conditionKind: TriggerConditionKind;
     value: number;
     action: TriggerAction;
+    notionalUsd?: number;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const symbol = input.symbol.trim().toUpperCase();
     if (!symbol) return { ok: false, error: "Enter a ticker first." };
@@ -518,6 +519,7 @@ export function DeskShell() {
           symbol,
           condition: { kind: input.conditionKind, value: input.value },
           action: input.action,
+          notionalUsd: input.notionalUsd,
         }),
       });
       const data = (await res.json()) as {
@@ -770,7 +772,7 @@ export function DeskShell() {
                 <span className="desk-trigger-symbol">{trg.symbol}</span>
                 <span className="desk-trigger-meta">
                   {formatTriggerCondition(trg.condition)} ·{" "}
-                  {formatTriggerAction(trg.action)}
+                  {formatTriggerActionDetail(trg)}
                 </span>
               </div>
               <button
@@ -1382,6 +1384,8 @@ export function DeskShell() {
         watchlistLimit={MAX_USER_WATCHLIST}
         triggerCount={triggers.length}
         triggerLimit={triggerLimit}
+        paperCash={portfolio?.cash}
+        openSymbols={(portfolio?.positions ?? []).map((p) => p.symbol)}
         initialTab={addModalTab}
         onClose={() => {
           if (busyAdd || busyTrigger === "create") return;
@@ -1451,7 +1455,7 @@ export function DeskShell() {
             This deletes your{" "}
             <strong>
               {pendingRemoveTrigger
-                ? `${formatTriggerCondition(pendingRemoveTrigger.condition)} · ${formatTriggerAction(pendingRemoveTrigger.action)}`
+                ? `${formatTriggerCondition(pendingRemoveTrigger.condition)} · ${formatTriggerActionDetail(pendingRemoveTrigger)}`
                 : "trigger"}
             </strong>{" "}
             rule for <strong>{pendingRemoveTrigger?.symbol}</strong>. Cron

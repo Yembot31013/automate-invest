@@ -140,6 +140,10 @@ export async function paperBuy(params: {
     await setPaperCash(params.userId, cashRemaining);
 
     return { ...toMark(position, entryPrice), cashRemaining };
+  }).then(async (result) => {
+    const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
+    await syncTriggersWithPaperBook(params.userId);
+    return result;
   });
 }
 
@@ -191,6 +195,10 @@ export async function paperSell(params: {
     const next = positions.map((p) => (p.id === closed.id ? closed : p));
     await savePaperPositions(params.userId, next);
     return { ...toMark(closed, exitPrice), cashRemaining };
+  }).then(async (result) => {
+    const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
+    await syncTriggersWithPaperBook(params.userId);
+    return result;
   });
 }
 
@@ -286,6 +294,10 @@ export async function paperSellMany(params: {
       cashRemaining: Number(cashRemaining.toFixed(2)),
       remainingOpen,
     };
+  }).then(async (result) => {
+    const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
+    await syncTriggersWithPaperBook(params.userId);
+    return result;
   });
 }
 

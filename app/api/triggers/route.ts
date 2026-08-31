@@ -4,6 +4,12 @@ import { NextResponse } from "next/server";
 import { MarketDataError, verifyTradableSymbolDetailed } from "@/lib/market";
 import { MAX_USER_TRIGGERS } from "@/lib/limits";
 import { logger } from "@/lib/logger";
+import { loadTriggerBookContext } from "@/lib/trigger-sync";
+import {
+  TriggerValidationError,
+  validateTriggerCreate,
+  validateTriggerEnable,
+} from "@/lib/trigger-validate";
 import {
   createUserTrigger,
   listUserTriggers,
@@ -84,12 +90,32 @@ export async function POST(request: Request) {
       typeof body.exchange === "string" ? body.exchange : undefined,
     );
 
+    const notionalUsd = normalizeNotionalUsd(body.notionalUsd);
+    const [existing, book] = await Promise.all([
+      listUserTriggers(userId),
+      loadTriggerBookContext(userId),
+    ]);
+    const readiness = validateTriggerCreate({
+      symbol: verified.symbol,
+      condition,
+      action,
+      notionalUsd,
+      existing,
+      book,
+    });
+    if (!readiness.ok) {
+      return NextResponse.json(
+        { ok: false, error: readiness.error },
+        { status: 400 },
+      );
+    }
+
     const trigger = await createUserTrigger(userId, {
       symbol: verified.symbol,
       exchange: verified.exchange,
       condition,
       action,
-      notionalUsd: normalizeNotionalUsd(body.notionalUsd),
+      notionalUsd,
     });
     const triggers = await listUserTriggers(userId);
     return NextResponse.json(
@@ -103,6 +129,7 @@ export async function POST(request: Request) {
     const status =
       error instanceof MarketDataError ||
       error instanceof TriggerLimitError ||
+      error instanceof TriggerValidationError ||
       message.includes("required") ||
       message.includes("No live quote") ||
       message.includes("Could not verify") ||
@@ -135,6 +162,29 @@ export async function PATCH(request: Request) {
       );
     }
 
+    if (body.enabled) {
+      const existing = await listUserTriggers(userId);
+      const current = existing.find((t) => t.id === id);
+      if (!current) {
+        return NextResponse.json(
+          { ok: false, error: "Trigger not found" },
+          { status: 404 },
+        );
+      }
+      const book = await loadTriggerBookContext(userId);
+      const readiness = validateTriggerEnable({
+        trigger: current,
+        existing,
+        book,
+      });
+      if (!readiness.ok) {
+        return NextResponse.json(
+          { ok: false, error: readiness.error },
+          { status: 400 },
+        );
+      }
+    }
+
     const trigger = await setUserTriggerEnabled(userId, id, body.enabled);
     if (!trigger) {
       return NextResponse.json(
@@ -148,7 +198,9 @@ export async function PATCH(request: Request) {
     const message =
       error instanceof Error ? error.message : "Failed to update trigger";
     logger.error("api/triggers", message, { userId });
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const status =
+      error instanceof TriggerValidationError ? 400 : 500;
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 }
 

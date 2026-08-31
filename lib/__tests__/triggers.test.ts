@@ -72,6 +72,14 @@ describe("triggers", () => {
     assert.equal(list.length, 1);
     assert.match(formatTriggerSummary(list[0]!), /TSLA/);
     assert.match(formatTriggerSummary(list[0]!), /Paper sell/);
+
+    const buy = buildDeskTrigger({
+      symbol: "GOOG",
+      condition: { kind: "day_drop_pct", value: 3 },
+      action: "paper_buy",
+      notionalUsd: 2000,
+    });
+    assert.match(formatTriggerSummary(buy), /Paper buy \$2k/);
   });
 });
 
