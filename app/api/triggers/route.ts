@@ -14,6 +14,7 @@ import {
   normalizeNotionalUsd,
   normalizeTriggerAction,
   normalizeTriggerCondition,
+  TRIGGER_CONDITION_HINT,
   TriggerLimitError,
 } from "@/lib/triggers";
 
@@ -63,8 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "Invalid condition — use day_drop_pct, day_gain_pct, price_below, or price_above with a positive value",
+          error: TRIGGER_CONDITION_HINT,
         },
         { status: 400 },
       );

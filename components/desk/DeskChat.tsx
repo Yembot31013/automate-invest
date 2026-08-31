@@ -65,7 +65,7 @@ type DeskChatProps = {
   externalPrompt?: string | null;
   onExternalPromptConsumed?: () => void;
   onBusyChange?: (busy: boolean) => void;
-  /** Fired when chat tools mutate watchlist / paper book so the desk can refresh. */
+  /** Fired when chat tools mutate watchlist / paper book / triggers so the desk can refresh. */
   onDeskMutated?: (summary: string) => void;
   /** Bump to focus the composer (e.g. Sidekick card click). */
   focusSignal?: number;
@@ -77,6 +77,9 @@ const DESK_MUTATING_TOOLS = new Set([
   "monitorSymbol",
   "monitorSymbols",
   "unmonitorSymbol",
+  "createTrigger",
+  "setTriggerEnabled",
+  "removeTrigger",
   "paperBuy",
   "paperSell",
   "paperSellMany",
@@ -99,6 +102,12 @@ function toolMutationSummary(toolName: string): string {
       return "Watchlist updated";
     case "unmonitorSymbol":
       return "Ticker removed";
+    case "createTrigger":
+      return "Trigger armed";
+    case "setTriggerEnabled":
+      return "Trigger updated";
+    case "removeTrigger":
+      return "Trigger removed";
     case "reportCapabilityGap":
       return "Flagged a capability gap";
     case "paperBuy":

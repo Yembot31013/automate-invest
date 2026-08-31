@@ -349,7 +349,31 @@ function canonicalizeNgxTicker(cleaned: string): string | null {
   const fromAlias = NGX_NAME_ALIASES[cleaned];
   if (fromAlias) return fromAlias;
   if (NGX_TICKER_SET.has(cleaned)) return cleaned;
-  return null;
+
+  // "dangote stock" / "dangote cement plc" → strip noise then re-resolve
+  let stripped = cleaned;
+  let prev = "";
+  while (stripped !== prev) {
+    prev = stripped;
+    stripped = stripped.replace(/^(THE)/, "");
+    stripped = stripped.replace(/(STOCKS|STOCK|SHARES|EQUITY|PLC)$/g, "");
+  }
+  if (stripped && stripped !== cleaned) {
+    const nested = canonicalizeNgxTicker(stripped);
+    if (nested) return nested;
+  }
+
+  // Longest alias contained in the compact string (DANGOTESTOCK → DANGOTE)
+  let bestAlias = "";
+  let bestTicker: string | null = null;
+  for (const [alias, ticker] of Object.entries(NGX_NAME_ALIASES)) {
+    if (alias.length < 3) continue;
+    if (cleaned.includes(alias) && alias.length > bestAlias.length) {
+      bestAlias = alias;
+      bestTicker = ticker;
+    }
+  }
+  return bestTicker;
 }
 
 /**
@@ -467,7 +491,21 @@ export function findWatchlistSymbol(
   entries: ReadonlyArray<{ symbol: string }>,
   input: string,
 ): string | undefined {
-  return entries.find((entry) => symbolsMatch(entry.symbol, input))?.symbol;
+  const direct = entries.find((entry) => symbolsMatch(entry.symbol, input))
+    ?.symbol;
+  if (direct) return direct;
+
+  // Soft fallback: resolved ticker appears inside messy input, or input inside stored symbol
+  const resolved = resolveSymbolInput(input).symbol.replaceAll("/", "");
+  if (resolved.length >= 3) {
+    const byResolved = entries.find((entry) => {
+      const stored = entry.symbol.replaceAll("/", "");
+      return stored === resolved || stored.includes(resolved) || resolved.includes(stored);
+    })?.symbol;
+    if (byResolved) return byResolved;
+  }
+
+  return undefined;
 }
 
 const CRYPTO_NEWS_ALIASES: Record<string, string[]> = {

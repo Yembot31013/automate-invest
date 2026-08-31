@@ -43,9 +43,10 @@ import {
 import {
   formatTriggerSummary,
   normalizeNotionalUsd,
+  normalizeTriggerCondition,
+  TRIGGER_CONDITION_HINT,
   TriggerLimitError,
   type TriggerAction,
-  type TriggerConditionKind,
 } from "@/lib/triggers";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
@@ -238,9 +239,9 @@ export function createDeskTools(userId: string) {
 
     createTrigger: tool({
       description:
-        "Create a user Trigger checked on cron/scan. Examples: buy GOOG when day drop hits 3% (day_drop_pct + paper_buy), alert when AAPL ≤ 180 (price_below + attention), sell TSLA on a +5% day (day_gain_pct + paper_sell). Max " +
+        "Create a user Trigger (same rules as Add → Trigger in the sidebar). Conditions: day_drop_pct / day_gain_pct / price_below / price_above. Threshold value MUST be a positive magnitude — never 0. day_drop_pct value 3 = fire when day ≤ −3%; day_gain value 5 = day ≥ +5%. Vague asks like 'any negative', 'goes red', 'when it dips' are NOT value 0 — ask for a concrete % (1/2/3…) or propose one and wait for yes before calling. Examples: buy GOOG on −3% day → day_drop_pct + 3 + paper_buy; alert AAPL ≤ 180 → price_below + 180 + attention. Max " +
         String(MAX_USER_TRIGGERS) +
-        ". Does NOT require Auto-trade to be on. Always call when they clearly want a standing rule.",
+        ". Does NOT require Auto-trade.",
       inputSchema: z.object({
         symbol: z.string().describe("Ticker, e.g. GOOG, NVDA, BTC/USD"),
         exchange: z.string().optional(),
@@ -252,16 +253,17 @@ export function createDeskTools(userId: string) {
             "price_above",
           ])
           .describe(
-            "day_drop_pct: changePct ≤ −value; day_gain_pct: ≥ +value; price_below/above: absolute mark",
+            "Matches the Add modal When dropdown: day_drop_pct (day ≤ −value%), day_gain_pct (day ≥ +value%), price_below / price_above",
           ),
         value: z
           .number()
-          .positive()
-          .describe("Percent points (3 = 3%) or absolute price"),
+          .describe(
+            "Positive threshold only (same as Add modal Threshold). Day %: 3 means 3 points, not −3. Price: absolute mark > 0. Never 0.",
+          ),
         action: z
           .enum(["attention", "paper_buy", "paper_sell"])
           .describe(
-            "attention = email + chat chip only; paper_buy / paper_sell = paper book",
+            "Matches Add modal Then: attention = email + chat chip; paper_buy / paper_sell = paper book",
           ),
         notionalUsd: z
           .number()
@@ -277,15 +279,23 @@ export function createDeskTools(userId: string) {
         action,
         notionalUsd,
       }) => {
+        const condition = normalizeTriggerCondition({
+          kind: conditionKind,
+          value,
+        });
+        if (!condition) {
+          return {
+            ok: false,
+            error: TRIGGER_CONDITION_HINT,
+            limitHit: false,
+          };
+        }
         try {
           const verified = await verifyTradableSymbolDetailed(symbol, exchange);
           const trigger = await createUserTrigger(userId, {
             symbol: verified.symbol,
             exchange: verified.exchange,
-            condition: {
-              kind: conditionKind as TriggerConditionKind,
-              value,
-            },
+            condition,
             action: action as TriggerAction,
             notionalUsd: normalizeNotionalUsd(notionalUsd),
           });
@@ -479,24 +489,27 @@ export function createDeskTools(userId: string) {
 
     unmonitorSymbol: tool({
       description:
-        "Remove one ticker from the user's watchlist. Call this for casual asks like 'remove it', 'take that off', 'drop BTC', 'stop watching amazon' — resolve the symbol from context/live watchlist first. Never claim removal without this tool returning removed: true.",
+        "Remove one ticker from the user's watchlist. Call for 'remove it', 'take that off', 'drop BTC', 'stop watching dangote/amazon'. Resolve Nigerian names to NGX tickers (dangote → DANGCEM). If unsure which symbol, call listWatchlist first. ONLY claim removal when this tool returns removed: true — if removed: false / ok: false, say it was not on the list.",
       inputSchema: z.object({
         symbol: z
           .string()
-          .describe("Ticker to remove, e.g. BTC, AMZN, GOOG"),
+          .describe(
+            "Ticker or casual name to remove, e.g. BTC, AMZN, GOOG, DANGCEM, dangote",
+          ),
       }),
       execute: async ({ symbol }) => {
         const before = await getUserWatchlist(userId);
         const matched = findWatchlistSymbol(before, symbol);
         if (!matched) {
-          const fallback = resolveSymbolInput(symbol).symbol || symbol.trim().toUpperCase();
+          const fallback =
+            resolveSymbolInput(symbol).symbol || symbol.trim().toUpperCase();
           return {
-            ok: true,
+            ok: false,
             removed: false,
             symbol: fallback,
             wasPresent: false,
             watchlist: before,
-            message: `${fallback} was not on the watchlist`,
+            message: `${fallback} was not on the watchlist — nothing removed. Live list: ${before.map((e) => e.symbol).join(", ") || "(empty)"}`,
           };
         }
         const watchlist = await removeFromUserWatchlist(userId, matched);

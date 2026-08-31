@@ -63,23 +63,36 @@ function newTriggerId(): string {
   return `trg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Human-readable reject reason for invalid trigger thresholds. */
+export const TRIGGER_CONDITION_HINT =
+  "Threshold must be a positive number — same as the Add → Trigger form. " +
+  "For day drop/gain use percent points (3 = −3% / +3% day). " +
+  "Do not use 0 or 'any negative'; ask for a concrete % (e.g. 1, 2, 3) or price.";
+
+/**
+ * Normalize condition payload. Day % kinds accept a mistaken negative magnitude
+ * (−3 → 3) so clients/models that mirror the signed % still work; 0 is never valid.
+ */
 export function normalizeTriggerCondition(
   raw: unknown,
 ): TriggerCondition | null {
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
   const kind = rec.kind;
-  const value = typeof rec.value === "number" ? rec.value : Number(rec.value);
+  let value = typeof rec.value === "number" ? rec.value : Number(rec.value);
   if (typeof kind !== "string" || !CONDITION_KINDS.has(kind as TriggerConditionKind)) {
     return null;
   }
-  if (!Number.isFinite(value) || value <= 0) return null;
-  if (
-    (kind === "day_drop_pct" || kind === "day_gain_pct") &&
-    value > 90
-  ) {
+  if (!Number.isFinite(value)) return null;
+
+  const isDayPct = kind === "day_drop_pct" || kind === "day_gain_pct";
+  if (isDayPct) {
+    value = Math.abs(value);
+    if (value <= 0 || value > 90) return null;
+  } else if (value <= 0) {
     return null;
   }
+
   return { kind: kind as TriggerConditionKind, value };
 }
 

@@ -127,6 +127,12 @@ function sidekickDeedLine(summary: string): string {
       return "List updated · still loyal";
     case "Ticker removed":
       return "Dropped one · eyes forward";
+    case "Trigger armed":
+      return "Trigger armed · watching";
+    case "Trigger updated":
+      return "Trigger tweaked · still on it";
+    case "Trigger removed":
+      return "Trigger cleared · noted";
     case "Paper buy filled":
       return "Paper buy · salute";
     case "Paper sell filled":
@@ -732,9 +738,22 @@ export function DeskShell() {
 
         <p className="font-mono-label px-1 pt-3">Triggers</p>
         <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">
-          {triggers.length}/{triggerLimit} · cron checks these on scan
+          {loading ? "…" : `${triggers.length}/${triggerLimit}`} · cron checks
+          these on scan
         </p>
-        {triggers.length === 0 ? (
+        {loading ? (
+          <div
+            className="space-y-2 px-1"
+            aria-busy="true"
+            aria-label="Loading triggers"
+          >
+            <Skeleton lines={2} />
+            <p className="flex items-center gap-2 text-xs text-[var(--muted)]">
+              <Spinner size="sm" label="Loading triggers" />
+              Loading your triggers…
+            </p>
+          </div>
+        ) : triggers.length === 0 ? (
           <EmptyHint
             title="No triggers yet"
             body="Tap Add below to arm a rule — e.g. GOOG day drop 3% → alert or paper buy."

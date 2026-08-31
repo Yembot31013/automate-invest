@@ -46,6 +46,9 @@ describe("resolveSymbolInput", () => {
     });
     assert.equal(resolveSymbolInput("gtco.ng").symbol, "GTCO");
     assert.equal(resolveSymbolInput("dangote cement").exchange, "NGX");
+    assert.equal(resolveSymbolInput("dangote cement").symbol, "DANGCEM");
+    assert.equal(resolveSymbolInput("dangote stock").symbol, "DANGCEM");
+    assert.equal(resolveSymbolInput("dangote").symbol, "DANGCEM");
     assert.equal(resolveSymbolInput("ACCESS", "NGX").symbol, "ACCESS");
     assert.equal(resolveSymbolInput("ACCESS").exchange, "NASDAQ");
   });
@@ -85,9 +88,15 @@ describe("crypto helpers", () => {
   });
 
   it("finds stored watchlist symbols from aliases", () => {
-    const list = [{ symbol: "BTC/USD" }, { symbol: "AAPL" }];
+    const list = [
+      { symbol: "BTC/USD" },
+      { symbol: "AAPL" },
+      { symbol: "DANGCEM" },
+    ];
     assert.equal(findWatchlistSymbol(list, "bitcoin"), "BTC/USD");
     assert.equal(findWatchlistSymbol(list, "AAPL"), "AAPL");
+    assert.equal(findWatchlistSymbol(list, "dangote stock"), "DANGCEM");
+    assert.equal(findWatchlistSymbol(list, "DANGCEM"), "DANGCEM");
     assert.equal(findWatchlistSymbol(list, "NVDA"), undefined);
   });
 

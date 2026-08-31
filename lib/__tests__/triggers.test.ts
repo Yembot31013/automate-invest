@@ -5,6 +5,7 @@ import {
   buildDeskTrigger,
   formatTriggerSummary,
   mergeScanUniverse,
+  normalizeTriggerCondition,
   normalizeTriggerList,
   triggerConditionMet,
 } from "../triggers.ts";
@@ -23,6 +24,25 @@ describe("triggers", () => {
     assert.equal(
       triggerConditionMet(t.condition, { changePct: -2.9, currentPrice: 100 }),
       false,
+    );
+  });
+
+  it("normalizes day % magnitude (rejects 0 / abs negatives)", () => {
+    assert.deepEqual(
+      normalizeTriggerCondition({ kind: "day_drop_pct", value: 3 }),
+      { kind: "day_drop_pct", value: 3 },
+    );
+    assert.deepEqual(
+      normalizeTriggerCondition({ kind: "day_drop_pct", value: -3 }),
+      { kind: "day_drop_pct", value: 3 },
+    );
+    assert.equal(
+      normalizeTriggerCondition({ kind: "day_drop_pct", value: 0 }),
+      null,
+    );
+    assert.equal(
+      normalizeTriggerCondition({ kind: "price_below", value: -10 }),
+      null,
     );
   });
 

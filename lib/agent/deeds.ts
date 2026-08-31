@@ -143,7 +143,10 @@ function toolOutputFailed(toolName: string, output: unknown): boolean {
     toolName === "monitorSymbols" ||
     toolName === "paperBuy" ||
     toolName === "paperSell" ||
-    toolName === "paperSellMany"
+    toolName === "paperSellMany" ||
+    toolName === "createTrigger" ||
+    toolName === "setTriggerEnabled" ||
+    toolName === "removeTrigger"
   ) {
     return rec.ok === false;
   }
