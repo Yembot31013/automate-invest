@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { readTheme } from "@/components/theme/theme";
+import { isCryptoPair } from "@/lib/symbols";
 
 type TradingViewModalProps = {
   open: boolean;
@@ -36,12 +37,26 @@ export function toTradingViewSymbol(symbol: string, exchange?: string): string {
   if (!sym) return "NASDAQ:AAPL";
 
   const ex = (exchange ?? "NASDAQ").trim().toUpperCase() || "NASDAQ";
+
+  if (ex === "FOREX" || ex === "COMMODITY") {
+    if (sym === "XAU/USD" || sym === "XAUUSD" || sym === "GOLD") {
+      return "OANDA:XAUUSD";
+    }
+    if (sym === "XAG/USD" || sym === "XAGUSD" || sym === "SILVER") {
+      return "OANDA:XAGUSD";
+    }
+    if (sym === "WTI/USD" || sym === "WTI" || sym === "USOIL") {
+      return "TVC:USOIL";
+    }
+    const compact = sym.replace("/", "");
+    return `OANDA:${compact}`;
+  }
+
   const looksCrypto =
     ex === "CRYPTO" ||
     ex === "COINBASE" ||
     ex === "BINANCE" ||
-    sym.includes("/") ||
-    sym.includes("-");
+    isCryptoPair(sym);
 
   if (looksCrypto) {
     return `COINBASE:${toTradingViewCryptoCode(sym)}`;

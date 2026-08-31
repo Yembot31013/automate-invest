@@ -4,11 +4,15 @@ import { describe, it } from "node:test";
 import {
   defaultExchangeForSymbol,
   findWatchlistSymbol,
+  isCommodityPair,
   isCryptoPair,
+  isForexPair,
+  isMacroPair,
   listSupportedCryptoPairs,
   resolveSymbolInput,
   symbolsMatch,
   cryptoNewsNeedles,
+  yahooChartSymbol,
 } from "../symbols.ts";
 
 describe("resolveSymbolInput", () => {
@@ -44,6 +48,24 @@ describe("resolveSymbolInput", () => {
     assert.equal(resolveSymbolInput("dangote cement").exchange, "NGX");
     assert.equal(resolveSymbolInput("ACCESS", "NGX").symbol, "ACCESS");
     assert.equal(resolveSymbolInput("ACCESS").exchange, "NASDAQ");
+  });
+
+  it("maps FX and commodity aliases before crypto intent", () => {
+    assert.deepEqual(resolveSymbolInput("xauusd"), {
+      symbol: "XAU/USD",
+      exchange: "COMMODITY",
+      assetClass: "commodity",
+      currency: "USD",
+    });
+    assert.equal(resolveSymbolInput("gold").symbol, "XAU/USD");
+    assert.equal(resolveSymbolInput("EURUSD").symbol, "EUR/USD");
+    assert.equal(resolveSymbolInput("eur/usd").exchange, "FOREX");
+    assert.equal(resolveSymbolInput("wti").symbol, "WTI/USD");
+    assert.equal(isMacroPair("XAU/USD"), true);
+    assert.equal(isForexPair("EUR/USD"), true);
+    assert.equal(isCommodityPair("XAG/USD"), true);
+    assert.equal(yahooChartSymbol("XAU/USD", "commodity"), "GC=F");
+    assert.equal(yahooChartSymbol("EUR/USD", "forex"), "EURUSD=X");
   });
 });
 

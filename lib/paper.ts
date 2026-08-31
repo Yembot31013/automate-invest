@@ -83,6 +83,11 @@ export async function paperBuy(params: {
       `Unsupported crypto ${resolved.symbol}. Supported: ${listSupportedCryptoPairs().join(", ")}`,
     );
   }
+  if (resolved.assetClass === "forex" || resolved.assetClass === "commodity") {
+    throw new Error(
+      `Paper trading is not enabled for ${resolved.symbol} yet — snapshots only for FX and commodities.`,
+    );
+  }
   const symbol = resolved.symbol;
   if (!symbol) {
     throw new Error("Symbol is required");
@@ -222,15 +227,23 @@ export async function getPortfolioSummary(
   };
 }
 
-/** Full snapshot — equities use company-news; crypto uses Finnhub crypto; NGX uses NGN Market. */
+/** Full snapshot — equities use company-news; crypto uses Finnhub crypto; macro uses forex feed; NGX uses NGN Market. */
 export async function loadSnapshot(symbol: string, exchange = "NASDAQ") {
   const resolved = resolveSymbolInput(symbol, exchange);
   const crypto = isCryptoPair(resolved.symbol);
   const ngx = isNgxExchange(exchange) || isNgxExchange(resolved.exchange);
-  const venue = crypto ? "CRYPTO" : ngx ? "NGX" : exchange;
+  const macro =
+    resolved.assetClass === "forex" || resolved.assetClass === "commodity";
+  const venue = crypto
+    ? "CRYPTO"
+    : ngx
+      ? "NGX"
+      : macro
+        ? resolved.exchange
+        : exchange;
   const [series, sentiment, headlines] = await Promise.all([
     fetchDailyOhlc(resolved.symbol, undefined, venue),
-    crypto || ngx
+    crypto || ngx || macro
       ? Promise.resolve(null)
       : fetchNewsSentiment(resolved.symbol),
     fetchHeadlinesForSymbol(resolved.symbol, 3, venue),

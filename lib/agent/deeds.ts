@@ -39,6 +39,23 @@ function pickSymbol(input: unknown): string | null {
   return null;
 }
 
+function toolOutputFailed(toolName: string, output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const rec = output as Record<string, unknown>;
+  if (toolName === "unmonitorSymbol") {
+    return rec.removed === false;
+  }
+  if (
+    toolName === "monitorSymbol" ||
+    toolName === "monitorSymbols" ||
+    toolName === "paperBuy" ||
+    toolName === "paperSell"
+  ) {
+    return rec.ok === false;
+  }
+  return false;
+}
+
 type DeedCopy = { running: string; done: string; error: string };
 
 const DEED_COPY: Record<string, DeedCopy> = {
@@ -120,8 +137,12 @@ export function deskDeedForTool(params: {
   toolName: string;
   state: string;
   input?: unknown;
+  output?: unknown;
 }): DeskDeed {
-  const phase = phaseFromState(params.state);
+  let phase = phaseFromState(params.state);
+  if (phase === "done" && toolOutputFailed(params.toolName, params.output)) {
+    phase = "error";
+  }
   const symbol = pickSymbol(params.input);
   const copy = DEED_COPY[params.toolName] ?? {
     running: "Working the desk…",

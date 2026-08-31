@@ -1,4 +1,4 @@
-export type AssetClass = "equity" | "crypto";
+export type AssetClass = "equity" | "crypto" | "forex" | "commodity";
 
 export type ResolvedSymbol = {
   /** Canonical desk symbol — e.g. AAPL, BTC/USD, or DANGCEM */
@@ -46,6 +46,50 @@ const SUPPORTED_CRYPTO_PAIRS = [
 ].sort();
 
 const SUPPORTED_CRYPTO_PAIR_SET = new Set(SUPPORTED_CRYPTO_PAIRS);
+
+/** Major FX + key commodities (Yahoo chart-backed on the desk). */
+const FX_PAIR_ALIASES: Record<string, string> = {
+  EURUSD: "EUR/USD",
+  EUR: "EUR/USD",
+  GBPUSD: "GBP/USD",
+  CABLE: "GBP/USD",
+  USDJPY: "USD/JPY",
+  JPY: "USD/JPY",
+  USDCHF: "USD/CHF",
+  CHF: "USD/CHF",
+  AUDUSD: "AUD/USD",
+  AUD: "AUD/USD",
+  USDCAD: "USD/CAD",
+  CAD: "USD/CAD",
+  NZDUSD: "NZD/USD",
+  NZD: "NZD/USD",
+  EURGBP: "EUR/GBP",
+};
+
+const COMMODITY_ALIASES: Record<string, string> = {
+  XAUUSD: "XAU/USD",
+  XAU: "XAU/USD",
+  GOLD: "XAU/USD",
+  XAGUSD: "XAG/USD",
+  XAG: "XAG/USD",
+  SILVER: "XAG/USD",
+  WTIUSD: "WTI/USD",
+  WTI: "WTI/USD",
+  USOIL: "WTI/USD",
+  CRUDE: "WTI/USD",
+  OIL: "WTI/USD",
+};
+
+const SUPPORTED_FX_PAIRS = [
+  ...new Set(Object.values(FX_PAIR_ALIASES)),
+].sort();
+
+const SUPPORTED_COMMODITY_PAIRS = [
+  ...new Set(Object.values(COMMODITY_ALIASES)),
+].sort();
+
+const SUPPORTED_FX_PAIR_SET = new Set(SUPPORTED_FX_PAIRS);
+const SUPPORTED_COMMODITY_PAIR_SET = new Set(SUPPORTED_COMMODITY_PAIRS);
 
 /**
  * Well-known NGX tickers (sync resolve without an API round-trip).
@@ -126,6 +170,90 @@ export function listExampleNgxTickers(): string[] {
   return ["DANGCEM", "GTCO", "MTNN", "ZENITHBANK", "BUACEMENT", "AIRTELAFRI"];
 }
 
+export function listSupportedFxPairs(): string[] {
+  return [...SUPPORTED_FX_PAIRS];
+}
+
+export function listSupportedCommodityPairs(): string[] {
+  return [...SUPPORTED_COMMODITY_PAIRS];
+}
+
+/** FX + commodities the desk can snapshot (for prompts). */
+export function listSupportedMacroPairs(): string[] {
+  return [...SUPPORTED_FX_PAIRS, ...SUPPORTED_COMMODITY_PAIRS].sort();
+}
+
+export function isForexPair(symbol: string): boolean {
+  const pair = canonicalizeFxPair(symbol);
+  return pair != null && SUPPORTED_FX_PAIR_SET.has(pair);
+}
+
+export function isCommodityPair(symbol: string): boolean {
+  const pair = canonicalizeCommodityPair(symbol);
+  return pair != null && SUPPORTED_COMMODITY_PAIR_SET.has(pair);
+}
+
+export function isMacroPair(symbol: string): boolean {
+  return isForexPair(symbol) || isCommodityPair(symbol);
+}
+
+function canonicalizeFxPair(raw: string): string | null {
+  const cleaned = stripPairSeparators(raw);
+  if (!cleaned) return null;
+
+  const fromAlias = FX_PAIR_ALIASES[cleaned];
+  if (fromAlias) return fromAlias;
+
+  if (cleaned.includes("/")) {
+    const pair = cleaned.replace("-", "/");
+    return SUPPORTED_FX_PAIR_SET.has(pair) ? pair : null;
+  }
+
+  if (/^[A-Z]{3}[A-Z]{3}$/.test(cleaned)) {
+    const slash = `${cleaned.slice(0, 3)}/${cleaned.slice(3)}`;
+    if (SUPPORTED_FX_PAIR_SET.has(slash)) return slash;
+    const slashAlt = `${cleaned.slice(0, 3)}/${cleaned.slice(3)}`;
+    return FX_PAIR_ALIASES[cleaned] ?? (SUPPORTED_FX_PAIR_SET.has(slashAlt) ? slashAlt : null);
+  }
+
+  return null;
+}
+
+function canonicalizeCommodityPair(raw: string): string | null {
+  const cleaned = stripPairSeparators(raw);
+  if (!cleaned) return null;
+
+  const fromAlias = COMMODITY_ALIASES[cleaned];
+  if (fromAlias) return fromAlias;
+
+  if (cleaned.includes("/")) {
+    const pair = cleaned.replace("-", "/");
+    return SUPPORTED_COMMODITY_PAIR_SET.has(pair) ? pair : null;
+  }
+
+  if (/^[A-Z]{3}USD$/.test(cleaned)) {
+    const pair = `${cleaned.slice(0, 3)}/USD`;
+    return SUPPORTED_COMMODITY_PAIR_SET.has(pair) ? pair : null;
+  }
+
+  return null;
+}
+
+/** Yahoo Finance chart ticker for desk FX / commodity pairs. */
+export function yahooChartSymbol(
+  deskSymbol: string,
+  assetClass: AssetClass,
+): string {
+  const pair = deskSymbol.toUpperCase();
+  if (assetClass === "commodity") {
+    if (pair === "XAU/USD") return "GC=F";
+    if (pair === "XAG/USD") return "SI=F";
+    if (pair === "WTI/USD") return "CL=F";
+  }
+  const compact = pair.replace("/", "");
+  return `${compact}=X`;
+}
+
 /** True only for allowlisted spot pairs (not arbitrary FOO/USD). */
 export function isCryptoPair(symbol: string): boolean {
   const pair = canonicalizeCryptoPair(symbol);
@@ -151,6 +279,8 @@ export function isKnownNgxTicker(symbol: string): boolean {
 
 export function defaultExchangeForSymbol(symbol: string): string {
   if (isCryptoPair(symbol)) return "CRYPTO";
+  if (isCommodityPair(symbol)) return "COMMODITY";
+  if (isForexPair(symbol)) return "FOREX";
   if (isKnownNgxTicker(symbol)) return "NGX";
   return "NASDAQ";
 }
@@ -247,6 +377,26 @@ export function resolveSymbolInput(
     };
   }
 
+  const commodity = canonicalizeCommodityPair(cleaned);
+  if (commodity) {
+    return {
+      symbol: commodity,
+      exchange: "COMMODITY",
+      assetClass: "commodity",
+      currency: "USD",
+    };
+  }
+
+  const fxPair = canonicalizeFxPair(cleaned);
+  if (fxPair) {
+    return {
+      symbol: fxPair,
+      exchange: "FOREX",
+      assetClass: "forex",
+      currency: "USD",
+    };
+  }
+
   if (looksLikeCryptoIntent(cleaned, hint)) {
     const attempted = cleaned.includes("/")
       ? cleaned
@@ -337,6 +487,31 @@ const CRYPTO_NEWS_ALIASES: Record<string, string[]> = {
   XRP: ["xrp", "ripple"],
   ADA: ["cardano", "ada"],
 };
+
+const FX_NEWS_ALIASES: Record<string, string[]> = {
+  "EUR/USD": ["eur/usd", "euro", "ecb", "eurusd"],
+  "GBP/USD": ["gbp/usd", "sterling", "cable", "gbpusd", "bank of england"],
+  "USD/JPY": ["usd/jpy", "usdjpy", "yen", "boj"],
+  "USD/CHF": ["usd/chf", "usdchf", "franc", "snb"],
+  "AUD/USD": ["aud/usd", "audusd", "aussie", "rba"],
+  "USD/CAD": ["usd/cad", "usdcad", "loonie", "boc"],
+  "NZD/USD": ["nzd/usd", "nzdusd", "kiwi", "rbnz"],
+  "EUR/GBP": ["eur/gbp", "eurgbp"],
+  "XAU/USD": ["gold", "xau", "xauusd", "bullion", "precious metal"],
+  "XAG/USD": ["silver", "xag", "xagusd"],
+  "WTI/USD": ["wti", "crude", "oil", "opec", "brent", "petroleum"],
+};
+
+/** Lowercase needles for Finnhub forex-category headline filtering. */
+export function macroNewsNeedles(symbol: string): string[] {
+  const resolved = resolveSymbolInput(symbol);
+  const pair = resolved.symbol;
+  const aliases = FX_NEWS_ALIASES[pair] ?? [
+    pair.replace("/", "").toLowerCase(),
+    pair.split("/")[0]?.toLowerCase() ?? "",
+  ];
+  return [...new Set(aliases.map((a) => a.toLowerCase()).filter(Boolean))];
+}
 
 /** Lowercase needles used to filter Finnhub crypto-category headlines for a pair. */
 export function cryptoNewsNeedles(symbol: string): string[] {

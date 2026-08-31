@@ -45,4 +45,15 @@ describe("deskDeedForTool", () => {
     assert.match(deed.label, /FX/i);
     assert.doesNotMatch(deed.label, /lookupForex/);
   });
+
+  it("shows monitor failure when tool returned ok false", () => {
+    const deed = deskDeedForTool({
+      toolName: "monitorSymbol",
+      state: "output-available",
+      input: { symbol: "XAU/USD" },
+      output: { ok: false, error: "Could not verify XAU/USD" },
+    });
+    assert.equal(deed.phase, "error");
+    assert.match(deed.label, /Couldn't pin/i);
+  });
 });

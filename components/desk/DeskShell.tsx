@@ -76,6 +76,22 @@ function formatTapePrice(value: number, exchange?: string): string {
   return formatUsd(value);
 }
 
+/** Shorter tape-card label — avoids COMMODITY:XAU/USD crowding the sparkline row. */
+function formatTapeCardLabel(exchange: string, symbol: string): string {
+  const ex = exchange.toUpperCase();
+  const sym = symbol.toUpperCase();
+  if (ex === "COMMODITY") {
+    if (sym === "XAU/USD") return "Gold · XAU/USD";
+    if (sym === "XAG/USD") return "Silver · XAG/USD";
+    if (sym === "WTI/USD") return "Oil · WTI";
+    return sym;
+  }
+  if (ex === "FOREX") return `FX · ${sym}`;
+  if (ex === "CRYPTO") return sym;
+  if (ex === "NGX" || ex === "NGN" || ex === "NSE") return `NGX · ${sym}`;
+  return `${ex} · ${sym}`;
+}
+
 /** Compact money for tight metric tiles ($100k, $1.2M) — avoids overflow. */
 function formatUsdCompact(value: number): string {
   const abs = Math.abs(value);
@@ -839,11 +855,11 @@ export function DeskShell() {
                   }}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-mono-label">
-                        {snap.exchange}:{snap.symbol}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono-label">
+                        {formatTapeCardLabel(snap.exchange, snap.symbol)}
                       </p>
-                      <p className="mt-1 text-lg font-extrabold tabular-nums">
+                      <p className="mt-1 truncate text-lg font-extrabold tabular-nums">
                         {snap.currentPrice != null
                           ? formatTapePrice(snap.currentPrice, snap.exchange)
                           : "—"}
@@ -854,40 +870,41 @@ export function DeskShell() {
                           : (snap.error ?? "—")}
                       </p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      {snap.closes && snap.closes.length > 1 && (
-                        <Tip label="Recent closing prices — green up, orange soft">
-                          <span>
-                            <Sparkline
-                              values={snap.closes}
-                              stroke={up ? "#8bd450" : "#ff8a5b"}
-                            />
+                    <Tip label={`Stop watching ${snap.symbol}`}>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${snap.symbol}`}
+                        disabled={busyRemove === snap.symbol}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingRemove(snap.symbol);
+                        }}
+                        className="btn-ghost shrink-0 !px-2.5 !py-1 text-[0.65rem]"
+                      >
+                        {busyRemove === snap.symbol ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Spinner size="sm" label="Removing" />
+                            …
                           </span>
-                        </Tip>
-                      )}
-                      <Tip label={`Stop watching ${snap.symbol}`}>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${snap.symbol}`}
-                          disabled={busyRemove === snap.symbol}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPendingRemove(snap.symbol);
-                          }}
-                          className="btn-ghost !px-2.5 !py-1 text-[0.65rem]"
-                        >
-                          {busyRemove === snap.symbol ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Spinner size="sm" label="Removing" />
-                              …
-                            </span>
-                          ) : (
-                            "Remove"
-                          )}
-                        </button>
+                        ) : (
+                          "Remove"
+                        )}
+                      </button>
+                    </Tip>
+                  </div>
+                  {snap.closes && snap.closes.length > 1 ? (
+                    <div className="mt-2 overflow-hidden">
+                      <Tip label="Recent closing prices — green up, orange soft">
+                        <span className="block w-full max-w-full">
+                          <Sparkline
+                            values={snap.closes}
+                            stroke={up ? "#8bd450" : "#ff8a5b"}
+                            className="h-10 w-full max-w-full"
+                          />
+                        </span>
                       </Tip>
                     </div>
-                  </div>
+                  ) : null}
                   <div className="mt-2 flex flex-wrap gap-3 text-[0.7rem] text-[var(--muted)]">
                     <Tip label="Today's volume vs the 20-day average">
                       <span>

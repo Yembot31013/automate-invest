@@ -38,8 +38,9 @@ export function Sparkline({
     <svg
       viewBox={`0 0 ${width} ${height}`}
       className={className}
-      width={width}
+      width="100%"
       height={height}
+      preserveAspectRatio="none"
       aria-hidden
     >
       <polyline

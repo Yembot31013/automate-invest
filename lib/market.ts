@@ -17,17 +17,26 @@ import {
 } from "@/lib/ngnmarket";
 import {
   defaultExchangeForSymbol,
+  isCommodityPair,
   isCryptoPair,
+  isForexPair,
   isKnownNgxTicker,
+  isMacroPair,
   isNgxExchange,
+  listSupportedCommodityPairs,
   listSupportedCryptoPairs,
+  listSupportedFxPairs,
+  listSupportedMacroPairs,
+  macroNewsNeedles,
   resolveSymbolInput,
   cryptoNewsNeedles,
+  yahooChartSymbol,
 } from "@/lib/symbols";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const ALPACA_DATA_BASE = "https://data.alpaca.markets/v2";
 const ALPACA_CRYPTO_BARS = "https://data.alpaca.markets/v1beta3/crypto/us/bars";
+const YAHOO_CHART_BASE = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 const DEFAULT_LOOKBACK_DAYS = 40;
 const SMA_PERIOD = 14;
@@ -323,6 +332,97 @@ export async function fetchAlpacaCryptoBars(
   return series;
 }
 
+interface YahooChartResponse {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          open?: Array<number | null>;
+          high?: Array<number | null>;
+          low?: Array<number | null>;
+          close?: Array<number | null>;
+          volume?: Array<number | null>;
+        }>;
+      };
+    }>;
+    error?: { code?: string; description?: string } | null;
+  };
+}
+
+/** FX / commodity daily bars via Yahoo Finance (Finnhub forex is paid-tier). */
+export async function fetchYahooDailyOhlc(
+  deskSymbol: string,
+  assetClass: "forex" | "commodity",
+  lookbackDays = DEFAULT_LOOKBACK_DAYS,
+): Promise<CandleSeries> {
+  const yahooSymbol = yahooChartSymbol(deskSymbol, assetClass);
+  const cacheKey = `cache:ohlc:yahoo:${deskSymbol}:${lookbackDays}`;
+  const cached = await cacheGet<CandleSeries>(cacheKey);
+  if (cached?.bars?.length) {
+    return cached;
+  }
+
+  const range =
+    lookbackDays <= 30 ? "2mo" : lookbackDays <= 90 ? "6mo" : "1y";
+  const url = new URL(
+    `${YAHOO_CHART_BASE}/${encodeURIComponent(yahooSymbol)}`,
+  );
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("range", range);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "SignalDesk/1.0",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new MarketDataError(
+      `Yahoo chart failed for ${deskSymbol}: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload = (await response.json()) as YahooChartResponse;
+  const result = payload.chart?.result?.[0];
+  if (payload.chart?.error || !result?.timestamp?.length) {
+    throw new MarketDataError(
+      `No Yahoo chart data for ${deskSymbol} (${yahooSymbol})`,
+    );
+  }
+
+  const quote = result.indicators?.quote?.[0];
+  const bars: OhlcBar[] = [];
+  for (let i = 0; i < result.timestamp.length; i += 1) {
+    const close = quote?.close?.[i];
+    if (close == null || !Number.isFinite(close)) continue;
+    const open = quote?.open?.[i] ?? close;
+    const high = quote?.high?.[i] ?? close;
+    const low = quote?.low?.[i] ?? close;
+    const volume = quote?.volume?.[i] ?? 0;
+    bars.push({
+      timestamp: result.timestamp[i] ?? 0,
+      open,
+      high,
+      low,
+      close,
+      volume: volume ?? 0,
+    });
+  }
+
+  if (bars.length === 0) {
+    throw new MarketDataError(`Empty Yahoo OHLC for ${deskSymbol}`);
+  }
+
+  const trimmed = bars.slice(-Math.max(lookbackDays + 5, SMA_PERIOD + 5));
+  const series = { symbol: deskSymbol.toUpperCase(), bars: trimmed };
+  await cacheSet(cacheKey, series, OHLC_CACHE_TTL);
+  return series;
+}
+
 function hasAlpacaCredentials(): boolean {
   return Boolean(
     process.env.ALPACA_API_KEY?.trim() &&
@@ -368,6 +468,14 @@ export async function fetchDailyOhlc(
   if (resolved.unsupportedCrypto) {
     throw new MarketDataError(
       `Unsupported crypto ${resolved.symbol}. Supported pairs: ${listSupportedCryptoPairs().join(", ")}`,
+    );
+  }
+
+  if (resolved.assetClass === "forex" || resolved.assetClass === "commodity") {
+    return fetchYahooDailyOhlc(
+      resolved.symbol,
+      resolved.assetClass,
+      lookbackDays,
     );
   }
 
@@ -455,6 +563,11 @@ export async function verifyTradableSymbolDetailed(
   };
 
   try {
+    if (resolved.assetClass === "forex" || resolved.assetClass === "commodity") {
+      const canonical = await tryFetch(resolved.symbol, resolved.exchange);
+      return { symbol: canonical, exchange: resolved.exchange };
+    }
+
     if (isNgxExchange(resolved.exchange) || isKnownNgxTicker(resolved.symbol)) {
       const canonical = await tryFetch(resolved.symbol, "NGX");
       return { symbol: canonical, exchange: "NGX" };
@@ -515,9 +628,15 @@ export async function toPaperUsdPrice(
 
 export {
   defaultExchangeForSymbol,
+  isCommodityPair,
   isCryptoPair,
+  isForexPair,
+  isMacroPair,
   isNgxExchange,
+  listSupportedCommodityPairs,
   listSupportedCryptoPairs,
+  listSupportedFxPairs,
+  listSupportedMacroPairs,
   resolveSymbolInput,
 };
 
@@ -769,7 +888,110 @@ export async function fetchCryptoMarketNews(
   }
 }
 
-/** Equity → company-news; crypto → Finnhub crypto feed; NGX → NGN Market news. */
+/**
+ * FX / commodity headlines via Finnhub market news (category=forex), keyword-filtered.
+ */
+export async function fetchMacroMarketNews(
+  symbol: string,
+  limit = 3,
+): Promise<CompanyNewsItem[]> {
+  const token = process.env.FINNHUB_API_KEY?.trim();
+  if (!token) {
+    return [];
+  }
+
+  const resolved = resolveSymbolInput(symbol);
+  if (!isMacroPair(resolved.symbol)) {
+    return [];
+  }
+
+  const pair = resolved.symbol;
+  const needles = macroNewsNeedles(pair);
+  const cacheKey = `cache:news:macro:${pair}:${limit}`;
+  const cached = await cacheGet<CompanyNewsItem[]>(cacheKey);
+  if (cached) {
+    return cached.slice(0, limit);
+  }
+
+  try {
+    await acquireFinnhubSlot();
+    const url = new URL(`${FINNHUB_BASE}/news`);
+    url.searchParams.set("category", "forex");
+    url.searchParams.set("token", token);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      logger.warn("market", "forex market news failed", {
+        symbol: pair,
+        status: response.status,
+      });
+      return [];
+    }
+
+    const payload = (await response.json()) as FinnhubCompanyNewsItem[];
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+
+    const matches = (text: string) => {
+      const hay = text.toLowerCase();
+      return needles.some((n) => {
+        if (n.length <= 3) {
+          const re = new RegExp(
+            `(^|[^a-z0-9])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`,
+            "i",
+          );
+          return re.test(hay);
+        }
+        return hay.includes(n);
+      });
+    };
+
+    const filtered = payload
+      .filter((item) => item.headline)
+      .filter(
+        (item) =>
+          matches(item.headline ?? "") || matches(item.summary ?? ""),
+      )
+      .map((item) => ({
+        headline: item.headline ?? "",
+        summary: item.summary ?? "",
+        source: item.source ?? "",
+        url: item.url ?? "",
+        datetime: item.datetime ?? 0,
+      }));
+
+    const items =
+      filtered.length > 0
+        ? filtered.slice(0, Math.max(limit, 10))
+        : payload
+            .filter((item) => item.headline)
+            .slice(0, Math.max(limit, 10))
+            .map((item) => ({
+              headline: item.headline ?? "",
+              summary: item.summary ?? "",
+              source: item.source ?? "",
+              url: item.url ?? "",
+              datetime: item.datetime ?? 0,
+            }));
+
+    await cacheSet(cacheKey, items, NEWS_CACHE_TTL);
+    return items.slice(0, limit);
+  } catch (error) {
+    logger.error("market", "macro market news error", {
+      symbol: pair,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
+/** Equity → company-news; crypto → Finnhub crypto; macro → forex feed; NGX → NGN Market. */
 export async function fetchHeadlinesForSymbol(
   symbol: string,
   limit = 3,
@@ -778,6 +1000,9 @@ export async function fetchHeadlinesForSymbol(
   const resolved = resolveSymbolInput(symbol, exchangeHint);
   if (isCryptoPair(symbol) || resolved.assetClass === "crypto") {
     return fetchCryptoMarketNews(symbol, limit);
+  }
+  if (resolved.assetClass === "forex" || resolved.assetClass === "commodity") {
+    return fetchMacroMarketNews(resolved.symbol, limit);
   }
   if (
     isNgxExchange(resolved.exchange) ||

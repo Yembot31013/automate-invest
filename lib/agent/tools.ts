@@ -55,9 +55,13 @@ export function createDeskTools(userId: string) {
   return {
     getSnapshot: tool({
       description:
-        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). After calling, explain headlines in plain English — do not only list titles. For NGX naira→dollar value questions, also call lookupForex.",
+        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). Supports US/NGX equities, allowlisted crypto, major FX pairs (EUR/USD, GBP/USD, …), and commodities (XAU/USD gold, XAG/USD silver, WTI/USD oil). After calling, explain headlines in plain English — do not only list titles. For NGX naira→dollar value questions, also call lookupForex.",
       inputSchema: z.object({
-        symbol: z.string().describe("Ticker symbol, e.g. NVDA or DANGCEM"),
+        symbol: z
+          .string()
+          .describe(
+            "Ticker or pair, e.g. NVDA, DANGCEM, XAU/USD, xauusd, EUR/USD, BTC/USD",
+          ),
         exchange: z
           .string()
           .optional()
@@ -158,7 +162,7 @@ export function createDeskTools(userId: string) {
 
     monitorSymbol: tool({
       description:
-        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended (US + NGX Nigeria); crypto is allowlist-only. For Nigerian names use e.g. DANGCEM, GTCO, NGX:ACCESS, or 'dangote cement'. Watchlist max is " +
+        "Add one ticker to the user's watchlist after verifying market data. Equities are open-ended (US + NGX Nigeria); crypto is allowlist-only; major FX and commodities (XAU/USD, EUR/USD, etc.) are supported too. For Nigerian names use e.g. DANGCEM, GTCO, NGX:ACCESS, or 'dangote cement'. Watchlist max is " +
         String(MAX_USER_WATCHLIST) +
         ". Always call when the user asks to monitor. Returns alreadyWatched / assetClass / exchange.",
       inputSchema: z.object({
@@ -186,7 +190,13 @@ export function createDeskTools(userId: string) {
             symbol: verified.symbol,
             exchange: verified.exchange,
             alreadyWatched,
-            assetClass: verified.exchange === "CRYPTO" ? "crypto" : "equity",
+            assetClass:
+              verified.exchange === "CRYPTO"
+                ? "crypto"
+                : verified.exchange === "FOREX" ||
+                    verified.exchange === "COMMODITY"
+                  ? "forex"
+                  : "equity",
             currency: verified.exchange === "NGX" ? "NGN" : "USD",
             watchlist,
           };
@@ -224,7 +234,7 @@ export function createDeskTools(userId: string) {
           ok: boolean;
           alreadyWatched?: boolean;
           exchange?: string;
-          assetClass?: "crypto" | "equity";
+          assetClass?: "crypto" | "equity" | "forex";
           error?: string;
         }> = [];
 
@@ -244,7 +254,12 @@ export function createDeskTools(userId: string) {
               alreadyWatched,
               exchange: verified.exchange,
               assetClass:
-                verified.exchange === "CRYPTO" ? "crypto" : "equity",
+                verified.exchange === "CRYPTO"
+                  ? "crypto"
+                  : verified.exchange === "FOREX" ||
+                      verified.exchange === "COMMODITY"
+                    ? "forex"
+                    : "equity",
             });
           } catch (error) {
             results.push({
@@ -357,7 +372,7 @@ export function createDeskTools(userId: string) {
 
     recommend: tool({
       description:
-        "Rank the user's watchlist for dip/breakout signals. Returns empty if watchlist is empty — never invents a universe.",
+        "Rank the user's watchlist ONLY for dip/breakout signals (not the whole market). Returns empty if watchlist is empty or nothing triggers. Never invents tickers outside the list.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(10).optional(),
       }),

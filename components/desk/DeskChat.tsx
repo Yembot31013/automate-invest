@@ -509,7 +509,8 @@ function DeskChatSession({
                 const state =
                   "state" in part ? String(part.state) : "running";
                 const input = "input" in part ? part.input : undefined;
-                const deed = deskDeedForTool({ toolName, state, input });
+                const output = "output" in part ? part.output : undefined;
+                const deed = deskDeedForTool({ toolName, state, input, output });
                 const toneClass =
                   deed.phase === "error"
                     ? "desk-deed-error"
