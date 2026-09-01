@@ -5,7 +5,8 @@ import {
   createBreakoutAlert,
   createDipAlert,
 } from "@/lib/discord";
-import { appendDeskEvent } from "@/lib/desk-events";
+import { attentionScanCopy } from "@/lib/desk-event-copy";
+import { appendDeskEvent, tapeFromSnapshot } from "@/lib/desk-events";
 import { getDeskSettings } from "@/lib/desk-settings-store";
 import { sendAttentionEmail } from "@/lib/email/attention";
 import { mapPool } from "@/lib/concurrency";
@@ -111,8 +112,11 @@ async function notifyUserAttention(params: {
   reactionLine: string | null;
   autoUnsure?: boolean;
   extraPoints?: string[];
+  /** When Auto already logged a chip, skip duplicate attention chip. */
+  skipChip?: boolean;
 }): Promise<void> {
-  const { userId, alert, reactionLine, autoUnsure, extraPoints } = params;
+  const { userId, alert, reactionLine, autoUnsure, extraPoints, skipChip } =
+    params;
   const email = await getClerkUserEmail(userId);
   const points = [
     ...(extraPoints ?? []),
@@ -120,6 +124,7 @@ async function notifyUserAttention(params: {
     "Open the desk to act — or ignore if you disagree.",
   ];
 
+  let emailed = false;
   if (email) {
     const sent = await sendAttentionEmail({
       to: email,
@@ -128,6 +133,7 @@ async function notifyUserAttention(params: {
       points,
       autoUnsure,
     });
+    emailed = sent.ok;
     if (!sent.ok) {
       logger.error("scan", "attention email failed", {
         userId,
@@ -138,14 +144,21 @@ async function notifyUserAttention(params: {
     logger.error("scan", "no email for attention", { userId });
   }
 
-  const chip = autoUnsure
-    ? `Attention (Auto unsure): ${alert.snapshot.symbol} ${alert.type} — check the desk`
-    : `Attention: ${alert.snapshot.symbol} ${alert.type} — emailed you the tape notes`;
+  if (skipChip) return;
+
+  const chip = attentionScanCopy({
+    symbol: alert.snapshot.symbol,
+    type: alert.type,
+    emailed,
+    autoUnsure,
+  });
 
   await appendDeskEvent(userId, {
     kind: "attention",
-    text: chip,
+    text: chip.text,
+    hint: chip.hint,
     symbol: alert.snapshot.symbol,
+    tape: tapeFromSnapshot(alert.snapshot, { alertType: alert.type }),
   });
 }
 
@@ -179,6 +192,7 @@ export async function deliverAlertToUser(params: {
         reactionLine,
         autoUnsure: true,
         extraPoints: result.summaries,
+        skipChip: result.summaries.length > 0,
       });
       return;
     }

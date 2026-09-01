@@ -12,6 +12,7 @@ import { TradingViewModal } from "@/components/desk/TradingViewModal";
 import { OnboardingModal } from "@/components/desk/OnboardingModal";
 import { AutoTradeEnableModal } from "@/components/desk/AutoTradeEnableModal";
 import { DeskAddModal } from "@/components/desk/DeskAddModal";
+import { DeskTriggerDetailModal } from "@/components/desk/DeskTriggerDetailModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import {
   BusyBanner,
@@ -26,8 +27,10 @@ import type { DeskSettings } from "@/lib/desk-settings";
 import { MAX_USER_TRIGGERS, MAX_USER_WATCHLIST } from "@/lib/limits";
 import { hasCompletedOnboarding } from "@/lib/onboarding";
 import {
+  formatTriggerAction,
   formatTriggerActionDetail,
   formatTriggerCondition,
+  formatTriggerNotional,
   type DeskTrigger,
   type TriggerAction,
   type TriggerConditionKind,
@@ -187,6 +190,9 @@ export function DeskShell() {
   const [busyTrigger, setBusyTrigger] = useState<string | null>(null);
   const [pendingRemoveTrigger, setPendingRemoveTrigger] =
     useState<DeskTrigger | null>(null);
+  const [selectedTriggerId, setSelectedTriggerId] = useState<string | null>(
+    null,
+  );
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -590,6 +596,7 @@ export function DeskShell() {
       }
       setTriggers(data.triggers ?? []);
       setPendingRemoveTrigger(null);
+      setSelectedTriggerId(null);
       bumpChatRefresh();
       showToast({ kind: "ok", message: "Trigger removed" });
     } catch (err) {
@@ -603,6 +610,11 @@ export function DeskShell() {
   }
 
   const pnlPositive = (portfolio?.totalUnrealizedPnl ?? 0) >= 0;
+  const selectedTrigger =
+    selectedTriggerId != null
+      ? (triggers.find((t) => t.id === selectedTriggerId) ?? null)
+      : null;
+  const openSymbols = (portfolio?.positions ?? []).map((p) => p.symbol);
   const anyBusy =
     busyAdd ||
     busyRemove != null ||
@@ -761,48 +773,83 @@ export function DeskShell() {
             body="Tap Add below to arm a rule — e.g. GOOG day drop 3% → alert or paper buy."
           />
         ) : (
-          triggers.map((trg) => (
+          triggers.map((trg, i) => (
             <div
               key={trg.id}
               className={`tilt-hover soft-card desk-trigger-row ${
-                !trg.enabled ? "opacity-60" : ""
-              } ${busyTrigger === trg.id ? "opacity-70" : ""}`}
+                busyTrigger === trg.id ? "is-busy" : ""
+              } ${!trg.enabled ? "is-paused" : ""}`}
             >
-              <div className="desk-trigger-copy">
-                <span className="desk-trigger-symbol">{trg.symbol}</span>
-                <span className="desk-trigger-meta">
-                  {formatTriggerCondition(trg.condition)} ·{" "}
-                  {formatTriggerActionDetail(trg)}
-                </span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={trg.enabled}
-                aria-label={`${trg.enabled ? "Disable" : "Enable"} trigger ${trg.symbol}`}
-                disabled={busyTrigger === trg.id}
-                className={`desk-switch shrink-0 ${trg.enabled ? "is-on" : ""}`}
-                onClick={() => {
-                  void toggleTrigger(trg.id, !trg.enabled);
-                }}
-              >
-                <span className="desk-switch-knob" aria-hidden="true" />
-              </button>
-              <Tip label={`Remove ${trg.symbol} trigger`}>
+              <div className="desk-trigger-card">
                 <button
                   type="button"
-                  aria-label={`Remove ${trg.symbol} trigger`}
+                  className="desk-trigger-main"
+                  aria-label={`Open ${trg.symbol} trigger details`}
                   disabled={busyTrigger === trg.id}
-                  onClick={() => setPendingRemoveTrigger(trg)}
-                  className="shrink-0 rounded-full px-2 py-1 text-xs font-bold text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--orange)_28%,var(--mix))] hover:text-[var(--ink)] disabled:opacity-50"
+                  onClick={() => setSelectedTriggerId(trg.id)}
                 >
-                  {busyTrigger === trg.id ? (
-                    <Spinner size="sm" label="Updating trigger" />
-                  ) : (
-                    "×"
-                  )}
+                  <div className="desk-trigger-head">
+                    <span
+                      className="desk-trigger-dot"
+                      style={{ background: ACCENTS[i % ACCENTS.length] }}
+                      aria-hidden="true"
+                    />
+                    <span className="desk-trigger-symbol">{trg.symbol}</span>
+                    <span
+                      className={`desk-trigger-status ${
+                        trg.enabled ? "is-on" : "is-paused"
+                      }`}
+                    >
+                      {trg.enabled ? "On" : "Paused"}
+                    </span>
+                  </div>
+                  <p className="desk-trigger-when">
+                    {formatTriggerCondition(trg.condition)}
+                  </p>
+                  <div className="desk-trigger-foot">
+                    <span
+                      className={`desk-trigger-action desk-trigger-action--${trg.action}`}
+                    >
+                      {formatTriggerAction(trg.action)}
+                    </span>
+                    {trg.action === "paper_buy" ? (
+                      <span className="desk-trigger-size">
+                        {formatTriggerNotional(trg.notionalUsd)}
+                      </span>
+                    ) : null}
+                  </div>
                 </button>
-              </Tip>
+                <div className="desk-trigger-controls">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={trg.enabled}
+                    aria-label={`${trg.enabled ? "Disable" : "Enable"} trigger ${trg.symbol}`}
+                    disabled={busyTrigger === trg.id}
+                    className={`desk-switch shrink-0 ${trg.enabled ? "is-on" : ""}`}
+                    onClick={() => {
+                      void toggleTrigger(trg.id, !trg.enabled);
+                    }}
+                  >
+                    <span className="desk-switch-knob" aria-hidden="true" />
+                  </button>
+                  <Tip label={`Remove ${trg.symbol} trigger`}>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${trg.symbol} trigger`}
+                      disabled={busyTrigger === trg.id}
+                      onClick={() => setPendingRemoveTrigger(trg)}
+                      className="shrink-0 rounded-full px-2 py-0.5 text-xs font-bold text-[var(--muted)] transition hover:bg-[color-mix(in_srgb,var(--orange)_28%,var(--mix))] hover:text-[var(--ink)] disabled:opacity-50"
+                    >
+                      {busyTrigger === trg.id ? (
+                        <Spinner size="sm" label="Updating trigger" />
+                      ) : (
+                        "×"
+                      )}
+                    </button>
+                  </Tip>
+                </div>
+              </div>
             </div>
           ))
         )}
@@ -1385,7 +1432,7 @@ export function DeskShell() {
         triggerCount={triggers.length}
         triggerLimit={triggerLimit}
         paperCash={portfolio?.cash}
-        openSymbols={(portfolio?.positions ?? []).map((p) => p.symbol)}
+        openSymbols={openSymbols}
         initialTab={addModalTab}
         onClose={() => {
           if (busyAdd || busyTrigger === "create") return;
@@ -1444,6 +1491,36 @@ export function DeskShell() {
         }}
         onConfirm={() => {
           if (pendingRemove) void removeSymbol(pendingRemove);
+        }}
+      />
+
+      <DeskTriggerDetailModal
+        open={selectedTrigger != null}
+        trigger={selectedTrigger}
+        busy={
+          selectedTrigger != null && busyTrigger === selectedTrigger.id
+        }
+        paperCash={portfolio?.cash}
+        openSymbols={openSymbols}
+        onClose={() => {
+          if (
+            selectedTrigger &&
+            busyTrigger === selectedTrigger.id
+          ) {
+            return;
+          }
+          setSelectedTriggerId(null);
+        }}
+        onToggle={(enabled) => {
+          if (selectedTrigger) {
+            void toggleTrigger(selectedTrigger.id, enabled);
+          }
+        }}
+        onRemove={() => {
+          if (selectedTrigger) {
+            setSelectedTriggerId(null);
+            setPendingRemoveTrigger(selectedTrigger);
+          }
         }}
       />
 

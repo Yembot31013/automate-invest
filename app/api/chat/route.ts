@@ -9,12 +9,17 @@ import {
   type UIMessage,
 } from "ai";
 
-import { lastUserText } from "@/lib/agent/chat-text";
+import { lastUserText, priorUserTexts } from "@/lib/agent/chat-text";
+import { requiresDeskVerificationFirst } from "@/lib/agent/desk-verify-intent";
 import { buildDeskInstructions } from "@/lib/agent/prompt";
 import { requiresSnapshotFirst } from "@/lib/agent/snapshot-intent";
 import { createDeskTools } from "@/lib/agent/tools";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
-import { withoutDeskEventMessages } from "@/lib/desk-events";
+import {
+  extractRecentDeskEvents,
+  formatDeskEventLogForPrompt,
+  withoutDeskEventMessages,
+} from "@/lib/desk-events";
 import { getDeskSettings } from "@/lib/desk-settings-store";
 import { logger } from "@/lib/logger";
 import {
@@ -75,13 +80,23 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { messages?: UIMessage[] };
     const messages = withUniqueMessageIds(body.messages ?? []);
+    const persisted = withUniqueMessageIds(
+      await getChatMessages<UIMessage>(userId),
+    );
     const watchlist = await getUserWatchlist(userId);
     const deskSettings = await getDeskSettings(userId);
     const triggers = await listUserTriggers(userId);
     const tools = createDeskTools(userId);
     const userText = lastUserText(messages);
     const forceSnapshotFirst = requiresSnapshotFirst(userText);
+    const forceDeskVerifyFirst = requiresDeskVerificationFirst(
+      userText,
+      priorUserTexts(messages),
+    );
     const modelMessages = withoutDeskEventMessages(messages);
+    const systemLogLines = formatDeskEventLogForPrompt(
+      extractRecentDeskEvents(persisted.length > 0 ? persisted : messages),
+    );
 
     const assistantCreatedAt = new Date().toISOString();
 
@@ -90,6 +105,7 @@ export async function POST(request: Request) {
       instructions: buildDeskInstructions({
         watchlistSymbols: watchlist.map((entry) => entry.symbol),
         triggerSummaries: triggers.map(formatTriggerSummary),
+        systemLogLines,
         autoTradeEnabled: deskSettings.autoTradeEnabled,
         takeProfitPct: deskSettings.takeProfitPct,
         stopLossPct: deskSettings.stopLossPct,
@@ -100,6 +116,18 @@ export async function POST(request: Request) {
       tools,
       stopWhen: isStepCount(8),
       prepareStep: ({ stepNumber, steps }) => {
+        if (forceDeskVerifyFirst && stepNumber === 0) {
+          const verified = steps.some((step) =>
+            step.toolCalls.some((call) => call.toolName === "portfolioPnL"),
+          );
+          if (!verified) {
+            return {
+              toolChoice: "required",
+              activeTools: ["portfolioPnL"],
+            };
+          }
+        }
+
         if (!forceSnapshotFirst || stepNumber > 0) return {};
 
         const snapshotted = steps.some((step) =>

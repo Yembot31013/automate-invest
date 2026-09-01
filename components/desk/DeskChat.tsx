@@ -17,6 +17,7 @@ import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { deskDeedForTool } from "@/lib/agent/deeds";
 import {
   deskEventKind,
+  deskEventTooltip,
   isDeskEventMessage,
 } from "@/lib/desk-events";
 import { formatChatTime, messageCreatedAt } from "@/lib/chat-time";
@@ -549,32 +550,42 @@ function DeskChatSession({
               .trim();
             const createdAt = messageCreatedAt(message);
             const kind = deskEventKind(message);
+            const tooltip = deskEventTooltip(message);
             const timeLabel = createdAt
               ? formatChatTime(createdAt, nowMs)
               : null;
             const absoluteLabel = createdAt
               ? new Date(createdAt).toLocaleString()
               : undefined;
+            const chip = (
+              <div
+                className={`desk-system-chip desk-system-${kind ?? "attention"}`}
+                role="status"
+              >
+                <span className="desk-system-text">{text}</span>
+                {timeLabel ? (
+                  <time
+                    className="desk-system-time"
+                    dateTime={createdAt ?? undefined}
+                    title={absoluteLabel}
+                  >
+                    {timeLabel}
+                  </time>
+                ) : null}
+              </div>
+            );
             return (
               <div
                 key={message.id?.trim() || `desk-event-${index}`}
                 className="desk-system-row fade-up"
               >
-                <div
-                  className={`desk-system-chip desk-system-${kind ?? "attention"}`}
-                  role="status"
-                >
-                  <span className="desk-system-text">{text}</span>
-                  {timeLabel ? (
-                    <time
-                      className="desk-system-time"
-                      dateTime={createdAt ?? undefined}
-                      title={absoluteLabel}
-                    >
-                      {timeLabel}
-                    </time>
-                  ) : null}
-                </div>
+                {tooltip ? (
+                  <Tip label={tooltip} className="desk-system-tip" as="div">
+                    {chip}
+                  </Tip>
+                ) : (
+                  chip
+                )}
               </div>
             );
           }

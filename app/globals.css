@@ -1472,6 +1472,12 @@ body {
   padding: 0.35rem 0.5rem;
 }
 
+.desk-system-tip {
+  display: inline-flex;
+  max-width: min(100%, 26rem);
+  cursor: help;
+}
+
 .desk-system-chip {
   display: flex;
   flex-direction: column;
@@ -1560,21 +1566,161 @@ body {
 
 .desk-trigger-row {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.desk-trigger-card {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.desk-trigger-card.is-paused {
+  opacity: 0.72;
+}
+
+.desk-trigger-row.is-paused {
+  opacity: 0.72;
+}
+
+.desk-trigger-row.is-busy {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.desk-trigger-card.is-busy {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.desk-trigger-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 0.55rem 0.45rem 0.55rem 0.6rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: inherit;
+  transition: background 0.15s ease;
+}
+
+.desk-trigger-main:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.desk-trigger-main:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--blue) 55%, var(--ink));
+  outline-offset: -2px;
+}
+
+.desk-trigger-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.15rem;
+  border-left: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+}
+
+.desk-trigger-head {
+  display: flex;
+  align-items: center;
   gap: 0.35rem;
-  padding: 0.45rem 0.55rem;
+  min-width: 0;
+}
+
+.desk-trigger-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.desk-trigger-symbol {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.desk-trigger-status {
+  flex-shrink: 0;
+  padding: 0.12rem 0.38rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.desk-trigger-status.is-on {
+  color: color-mix(in srgb, var(--green) 75%, var(--ink));
+  background: color-mix(in srgb, var(--green) 18%, var(--mix));
+}
+
+.desk-trigger-status.is-paused {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 8%, var(--mix));
+}
+
+.desk-trigger-when {
+  margin: 0.28rem 0 0 0.8rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+}
+
+.desk-trigger-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.32rem 0 0 0.8rem;
+}
+
+.desk-trigger-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.desk-trigger-action--attention {
+  color: color-mix(in srgb, var(--blue) 80%, var(--ink));
+  background: color-mix(in srgb, var(--blue) 16%, var(--mix));
+}
+
+.desk-trigger-action--paper_buy {
+  color: color-mix(in srgb, var(--green) 78%, var(--ink));
+  background: color-mix(in srgb, var(--green) 16%, var(--mix));
+}
+
+.desk-trigger-action--paper_sell {
+  color: color-mix(in srgb, var(--orange) 82%, var(--ink));
+  background: color-mix(in srgb, var(--orange) 18%, var(--mix));
+}
+
+.desk-trigger-size {
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .desk-trigger-copy {
   min-width: 0;
   flex: 1;
-}
-
-.desk-trigger-symbol {
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--ink);
 }
 
 .desk-trigger-meta {
@@ -1583,6 +1729,53 @@ body {
   font-size: 0.68rem;
   line-height: 1.35;
   color: var(--muted);
+}
+
+.desk-trigger-detail-modal {
+  width: min(100%, 400px);
+}
+
+.desk-trigger-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.desk-trigger-detail-symbol {
+  margin: 0;
+}
+
+.desk-trigger-detail-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0.85rem;
+}
+
+.desk-trigger-detail-grid dt {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.desk-trigger-detail-grid dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.desk-trigger-detail-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .desk-add-modal {

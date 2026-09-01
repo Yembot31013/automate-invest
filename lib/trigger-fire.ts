@@ -1,5 +1,11 @@
 import { getClerkUserEmail } from "@/lib/clerk-user";
-import { appendDeskEvent } from "@/lib/desk-events";
+import {
+  triggerAttentionCopy,
+  triggerBuyCopy,
+  triggerSellCopy,
+  triggerSkipCopy,
+} from "@/lib/desk-event-copy";
+import { appendDeskEvent, tapeFromSnapshot } from "@/lib/desk-events";
 import { sendAttentionEmail } from "@/lib/email/attention";
 import { logger } from "@/lib/logger";
 import { getPortfolioSummary, paperBuy, paperSellMany } from "@/lib/paper";
@@ -64,10 +70,18 @@ async function notifyTriggerAttention(params: {
     }
   }
 
+  const triggerTape = tapeFromSnapshot(snapshot);
+
+  const chip = triggerAttentionCopy({
+    summary: formatTriggerSummary(trigger),
+    changePct: snapshot.changePct,
+  });
   await appendDeskEvent(userId, {
     kind: "trigger-attention",
-    text: `Trigger: ${formatTriggerSummary(trigger)} · day ${snapshot.changePct >= 0 ? "+" : ""}${snapshot.changePct.toFixed(1)}%`,
+    text: chip.text,
+    hint: chip.hint,
     symbol: trigger.symbol,
+    tape: triggerTape,
   });
 }
 
@@ -77,6 +91,7 @@ async function fireTriggerAction(params: {
   snapshot: MarketSnapshot;
 }): Promise<void> {
   const { userId, trigger, snapshot } = params;
+  const triggerTape = tapeFromSnapshot(snapshot);
 
   if (trigger.action === "attention") {
     await notifyTriggerAttention({ userId, trigger, snapshot });
@@ -97,10 +112,18 @@ async function fireTriggerAction(params: {
         entryPrice: snapshot.currentPrice,
         notes: `trigger:${trigger.id}`,
       });
+      const chip = triggerBuyCopy({
+        symbol: trigger.symbol,
+        qty,
+        price: snapshot.currentPrice,
+        condition: formatTriggerCondition(trigger.condition),
+      });
       await appendDeskEvent(userId, {
         kind: "trigger-buy",
-        text: `Trigger buy: ${trigger.symbol} × ${qty} @ ~$${snapshot.currentPrice.toFixed(2)} (${formatTriggerCondition(trigger.condition)})`,
+        text: chip.text,
+        hint: chip.hint,
         symbol: trigger.symbol,
+        tape: triggerTape,
       });
       await notifyTriggerAttention({
         userId,
@@ -110,10 +133,16 @@ async function fireTriggerAction(params: {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Buy failed";
+      const chip = triggerSkipCopy({
+        symbol: trigger.symbol,
+        message,
+      });
       await appendDeskEvent(userId, {
         kind: "trigger-skip",
-        text: `Trigger buy skipped (${trigger.symbol}): ${message}`,
+        text: chip.text,
+        hint: chip.hint,
         symbol: trigger.symbol,
+        tape: triggerTape,
       });
       await notifyTriggerAttention({
         userId,
@@ -134,10 +163,16 @@ async function fireTriggerAction(params: {
         p.symbol.replaceAll("/", "") === trigger.symbol.replaceAll("/", ""),
     );
     if (!owned) {
+      const chip = triggerSkipCopy({
+        symbol: trigger.symbol,
+        message: "no open lot",
+      });
       await appendDeskEvent(userId, {
         kind: "trigger-skip",
-        text: `Trigger sell skipped (${trigger.symbol}): no open lot`,
+        text: chip.text,
+        hint: chip.hint,
         symbol: trigger.symbol,
+        tape: triggerTape,
       });
       await notifyTriggerAttention({
         userId,
@@ -151,10 +186,17 @@ async function fireTriggerAction(params: {
       userId,
       symbols: [trigger.symbol],
     });
+    const sellChip = triggerSellCopy({
+      symbol: trigger.symbol,
+      closedCount: sold.closedCount,
+      condition: formatTriggerCondition(trigger.condition),
+    });
     await appendDeskEvent(userId, {
       kind: "trigger-sell",
-      text: `Trigger sell: ${trigger.symbol} · closed ${sold.closedCount} lot(s) (${formatTriggerCondition(trigger.condition)})`,
+      text: sellChip.text,
+      hint: sellChip.hint,
       symbol: trigger.symbol,
+      tape: triggerTape,
     });
     await notifyTriggerAttention({
       userId,
@@ -164,10 +206,16 @@ async function fireTriggerAction(params: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sell failed";
+    const skipChip = triggerSkipCopy({
+      symbol: trigger.symbol,
+      message,
+    });
     await appendDeskEvent(userId, {
       kind: "trigger-skip",
-      text: `Trigger sell skipped (${trigger.symbol}): ${message}`,
+      text: skipChip.text,
+      hint: skipChip.hint,
       symbol: trigger.symbol,
+      tape: triggerTape,
     });
     await notifyTriggerAttention({
       userId,

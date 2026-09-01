@@ -237,6 +237,11 @@ function formatNotionalShort(usd: number): string {
   return `$${usd.toLocaleString()}`;
 }
 
+/** Display notional for trigger cards and detail. */
+export function formatTriggerNotional(usd: number): string {
+  return formatNotionalShort(usd);
+}
+
 export function formatTriggerActionDetail(trigger: DeskTrigger): string {
   if (trigger.action === "paper_buy") {
     return `Paper buy ${formatNotionalShort(trigger.notionalUsd)}`;

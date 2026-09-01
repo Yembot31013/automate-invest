@@ -13,7 +13,10 @@ import {
 } from "../desk-settings.ts";
 import {
   buildDeskEventPayload,
+  extractRecentDeskEvents,
+  formatDeskEventLogForPrompt,
   isDeskEventMessage,
+  tapeFromSnapshot,
   withoutDeskEventMessages,
 } from "../desk-events-meta.ts";
 
@@ -116,5 +119,31 @@ describe("desk events", () => {
     const filtered = withoutDeskEventMessages([user, event]);
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0]?.id, "u1");
+  });
+
+  it("extracts system log for Sidekick instructions", () => {
+    const event = buildDeskEventPayload({
+      kind: "auto-skip",
+      text: "Nah — Auto won't chase XAU/USD breakouts",
+      hint: "Auto-trade skipped · breakout",
+      symbol: "XAU/USD",
+      tape: tapeFromSnapshot(
+        { currentPrice: 4482, changePct: 1.1 },
+        { alertType: "breakout" },
+      ),
+      createdAt: "2025-08-31T19:31:00.000Z",
+    });
+    const user = {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "what happened overnight?" }],
+    };
+    const log = extractRecentDeskEvents([user, event]);
+    assert.equal(log.length, 1);
+    assert.equal(log[0]?.kind, "auto-skip");
+    const prompt = formatDeskEventLogForPrompt(log);
+    assert.match(prompt, /auto-skip/);
+    assert.match(prompt, /XAU\/USD/);
+    assert.match(prompt, /tape:/);
   });
 });

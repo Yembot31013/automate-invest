@@ -21,3 +21,17 @@ export function lastUserText(messages: UIMessage[]): string {
   }
   return "";
 }
+
+/** Recent user turns before the latest (for thread-intent heuristics). */
+export function priorUserTexts(
+  messages: UIMessage[],
+  limit = 3,
+): string[] {
+  const texts: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && texts.length < limit + 1; i -= 1) {
+    if (messages[i]?.role !== "user") continue;
+    const text = textFromUIMessage(messages[i]);
+    if (text) texts.push(text);
+  }
+  return texts.slice(1, limit + 1);
+}

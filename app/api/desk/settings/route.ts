@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { appendDeskEvent } from "@/lib/desk-events";
+import { autoDisabledCopy, autoEnabledCopy } from "@/lib/desk-event-copy";
 import {
   AUTO_TRADE_QUIZ_VERSION,
   gradeAutoTradeQuiz,
@@ -47,9 +48,11 @@ export async function PATCH(request: Request) {
 
     if (action === "disable") {
       const settings = await disableAutoTrade(userId);
+      const chip = autoDisabledCopy();
       await appendDeskEvent(userId, {
         kind: "auto-disabled",
-        text: "Auto-trade turned off — Attention mail still watches your board",
+        text: chip.text,
+        hint: chip.hint,
       });
       return NextResponse.json({ ok: true, settings });
     }
@@ -74,9 +77,11 @@ export async function PATCH(request: Request) {
         );
       }
       const settings = await enableAutoTrade(userId, AUTO_TRADE_QUIZ_VERSION);
+      const chip = autoEnabledCopy();
       await appendDeskEvent(userId, {
         kind: "auto-enabled",
-        text: `Auto-trade on · exits on owned lots · buys from watchlist only\nTP ${settings.takeProfitPct}% / stop ${settings.stopLossPct}% / trail ${settings.trailGivebackPct}%`,
+        text: chip.text,
+        hint: `${chip.hint} · TP ${settings.takeProfitPct}% / stop ${settings.stopLossPct}% / trail ${settings.trailGivebackPct}%`,
       });
       return NextResponse.json({ ok: true, settings });
     }
