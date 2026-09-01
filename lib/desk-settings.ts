@@ -19,6 +19,16 @@ export type DeskSettings = {
   maxBuyNotionalUsd: number;
   /** Cap auto buys per UTC day */
   maxBuysPerDay: number;
+  /** Enforce trigger spending / exposure limits */
+  guardrailsEnabled: boolean;
+  /** Max USD in one symbol (open position + armed buy triggers) */
+  maxSymbolExposureUsd: number;
+  /** Max successful trigger paper buys per UTC day */
+  maxTriggerBuysPerDay: number;
+  /** Max USD spent by trigger buys per UTC day */
+  maxTriggerSpendPerDayUsd: number;
+  /** Skip trigger buys when book unrealized PnL % is at or below −this value */
+  pauseTriggerBuysWhenBookDownPct: number;
 };
 
 export const DEFAULT_DESK_SETTINGS: DeskSettings = {
@@ -31,6 +41,11 @@ export const DEFAULT_DESK_SETTINGS: DeskSettings = {
   allowAutoBuys: true,
   maxBuyNotionalUsd: 2_000,
   maxBuysPerDay: 3,
+  guardrailsEnabled: true,
+  maxSymbolExposureUsd: 15_000,
+  maxTriggerBuysPerDay: 5,
+  maxTriggerSpendPerDayUsd: 10_000,
+  pauseTriggerBuysWhenBookDownPct: 3,
 };
 
 export type AutoTradeQuizOption = {
@@ -187,6 +202,31 @@ export function normalizeDeskSettings(
     ),
     maxBuysPerDay: Math.round(
       clampPct(raw.maxBuysPerDay, base.maxBuysPerDay, 0, 20),
+    ),
+    guardrailsEnabled:
+      typeof raw.guardrailsEnabled === "boolean"
+        ? raw.guardrailsEnabled
+        : base.guardrailsEnabled,
+    maxSymbolExposureUsd: clampPct(
+      raw.maxSymbolExposureUsd,
+      base.maxSymbolExposureUsd,
+      500,
+      100_000,
+    ),
+    maxTriggerBuysPerDay: Math.round(
+      clampPct(raw.maxTriggerBuysPerDay, base.maxTriggerBuysPerDay, 1, 30),
+    ),
+    maxTriggerSpendPerDayUsd: clampPct(
+      raw.maxTriggerSpendPerDayUsd,
+      base.maxTriggerSpendPerDayUsd,
+      100,
+      100_000,
+    ),
+    pauseTriggerBuysWhenBookDownPct: clampPct(
+      raw.pauseTriggerBuysWhenBookDownPct,
+      base.pauseTriggerBuysWhenBookDownPct,
+      0.5,
+      25,
     ),
   };
 }

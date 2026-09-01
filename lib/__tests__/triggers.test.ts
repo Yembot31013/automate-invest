@@ -101,6 +101,36 @@ describe("triggers", () => {
       false,
     );
   });
+
+  it("fires profit_usd_above from position context", () => {
+    const t = buildDeskTrigger({
+      symbol: "TSLA",
+      condition: { kind: "profit_usd_above", value: 28 },
+      action: "paper_sell",
+    });
+    assert.equal(
+      normalizeTriggerCondition({ kind: "profit_usd_above", value: 28 })
+        ?.value,
+      28,
+    );
+    assert.equal(
+      triggerConditionMet(
+        t.condition,
+        { changePct: 0.5, currentPrice: 400 },
+        { unrealizedPnl: 30, unrealizedPnlPct: 2 },
+      ),
+      true,
+    );
+    assert.equal(
+      triggerConditionMet(
+        t.condition,
+        { changePct: 0.5, currentPrice: 400 },
+        null,
+      ),
+      false,
+    );
+    assert.match(formatTriggerSummary(t), /profit ≥ \$28/);
+  });
 });
 
 describe("mergeScanUniverse", () => {

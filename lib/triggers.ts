@@ -5,7 +5,9 @@ export type TriggerConditionKind =
   | "day_drop_pct"
   | "day_gain_pct"
   | "price_below"
-  | "price_above";
+  | "price_above"
+  | "profit_usd_above"
+  | "profit_pct_above";
 
 export type TriggerCondition = {
   kind: TriggerConditionKind;
@@ -53,6 +55,8 @@ const CONDITION_KINDS = new Set<TriggerConditionKind>([
   "day_gain_pct",
   "price_below",
   "price_above",
+  "profit_usd_above",
+  "profit_pct_above",
 ]);
 
 const ACTIONS = new Set<TriggerAction>([
@@ -69,7 +73,8 @@ function newTriggerId(): string {
 export const TRIGGER_CONDITION_HINT =
   "Threshold must be a positive number — same as the Add → Trigger form. " +
   "For day drop/gain use percent points (3 = −3% / +3% day). " +
-  "Do not use 0 or 'any negative'; ask for a concrete % (e.g. 1, 2, 3) or price.";
+  "For profit rules use USD (28) or profit % (5 = +5% on your lot). " +
+  "Do not use 0 or 'any negative'; ask for a concrete % or price.";
 
 /**
  * Normalize condition payload. Day % kinds accept a mistaken negative magnitude
@@ -88,9 +93,17 @@ export function normalizeTriggerCondition(
   if (!Number.isFinite(value)) return null;
 
   const isDayPct = kind === "day_drop_pct" || kind === "day_gain_pct";
+  const isProfitPct = kind === "profit_pct_above";
+  const isProfitUsd = kind === "profit_usd_above";
   if (isDayPct) {
     value = Math.abs(value);
     if (value <= 0 || value > 90) return null;
+  } else if (isProfitPct) {
+    value = Math.abs(value);
+    if (value <= 0 || value > 500) return null;
+  } else if (isProfitUsd) {
+    value = Math.abs(value);
+    if (value < 1 || value > 50_000) return null;
   } else if (value <= 0) {
     return null;
   }
@@ -221,9 +234,33 @@ export function buildDeskTrigger(input: {
   };
 }
 
+export function isProfitTriggerCondition(kind: TriggerConditionKind): boolean {
+  return kind === "profit_usd_above" || kind === "profit_pct_above";
+}
+
+export function validateConditionActionPair(
+  action: TriggerAction,
+  condition: TriggerCondition,
+): { ok: true } | { ok: false; error: string } {
+  if (isProfitTriggerCondition(condition.kind) && action !== "paper_sell") {
+    return {
+      ok: false,
+      error:
+        "Profit conditions (profit ≥ $ or %) only work with Paper sell — pick that action or use a market When rule.",
+    };
+  }
+  return { ok: true };
+}
+
+export type TriggerPositionContext = {
+  unrealizedPnl: number;
+  unrealizedPnlPct: number;
+};
+
 export function triggerConditionMet(
   condition: TriggerCondition,
   snapshot: { changePct: number; currentPrice: number },
+  position?: TriggerPositionContext | null,
 ): boolean {
   switch (condition.kind) {
     case "day_drop_pct":
@@ -234,6 +271,14 @@ export function triggerConditionMet(
       return snapshot.currentPrice <= condition.value;
     case "price_above":
       return snapshot.currentPrice >= condition.value;
+    case "profit_usd_above":
+      return (
+        position != null && position.unrealizedPnl >= condition.value
+      );
+    case "profit_pct_above":
+      return (
+        position != null && position.unrealizedPnlPct >= condition.value
+      );
     default:
       return false;
   }
@@ -249,6 +294,10 @@ export function formatTriggerCondition(condition: TriggerCondition): string {
       return `price ≤ ${condition.value}`;
     case "price_above":
       return `price ≥ ${condition.value}`;
+    case "profit_usd_above":
+      return `profit ≥ $${condition.value.toLocaleString()}`;
+    case "profit_pct_above":
+      return `profit ≥ +${condition.value}%`;
     default:
       return "condition";
   }

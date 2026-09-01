@@ -51,6 +51,7 @@ import {
   TriggerLimitError,
   type TriggerAction,
 } from "@/lib/triggers";
+import { formatGuardrailsSummary } from "@/lib/trigger-guardrails";
 import { loadTriggerBookContext } from "@/lib/trigger-sync";
 import { createToolDedupeCache } from "@/lib/agent/tool-dedupe";
 import { mapPool } from "@/lib/concurrency";
@@ -298,6 +299,16 @@ export function createDeskTools(userId: string) {
           trailGivebackPct: settings.trailGivebackPct,
           maxBuyNotionalUsd: settings.maxBuyNotionalUsd,
           maxBuysPerDay: settings.maxBuysPerDay,
+          guardrails: {
+            enabled: settings.guardrailsEnabled,
+            summary: formatGuardrailsSummary(settings),
+            maxSymbolExposureUsd: settings.maxSymbolExposureUsd,
+            maxTriggerBuysPerDay: settings.maxTriggerBuysPerDay,
+            maxTriggerSpendPerDayUsd: settings.maxTriggerSpendPerDayUsd,
+            pauseTriggerBuysWhenBookDownPct:
+              settings.pauseTriggerBuysWhenBookDownPct,
+            howToEdit: "Activity panel → Guardrails",
+          },
           howToEnable:
             "Activity panel → Auto-trade → agree + short quiz (again after every disable).",
           expectation:
@@ -309,7 +320,7 @@ export function createDeskTools(userId: string) {
             limit: MAX_USER_TRIGGERS,
             enabled: triggers.filter((t) => t.enabled).length,
             summaries: triggers.map(formatTriggerSummary),
-            note: "User-defined rules checked on cron/scan (day % or price). Separate from Auto-trade dip/breakout system rules.",
+            note: "User-defined rules checked on cron/scan (day %, price, or profit on your lot). Buy + sell brackets on one ticker are OK. Separate from Auto-trade dip/breakout system rules.",
           },
         };
       },
@@ -331,7 +342,7 @@ export function createDeskTools(userId: string) {
 
     createTrigger: tool({
       description:
-        "Create a user Trigger (same rules as Add → Trigger). Conditions: day_drop_pct / day_gain_pct / price_below / price_above. Threshold MUST be positive (3 = −3% day for day_drop). Vague 'any negative' is NOT 0 — ask for a concrete %. paper_buy needs notionalUsd (25–5000) and enough paper cash; paper_sell requires an open lot in that symbol. Rejects duplicates and buy+sell conflicts on the same ticker. Max " +
+        "Create a user Trigger (same rules as Add → Trigger). Conditions: day_drop_pct / day_gain_pct / price_below / price_above / profit_usd_above / profit_pct_above (sell only — your lot's unrealized profit). Threshold MUST be positive (3 = −3% day for day_drop). Vague 'any negative' is NOT 0 — ask for a concrete %. paper_buy needs notionalUsd (25–5000) and enough paper cash; paper_sell can arm take-profit ahead (profit ≥ or day gain). Brackets (dip buy + take-profit sell) on one ticker are allowed. Rejects exact duplicates and day-drop buy+sell collision. Max " +
         String(MAX_USER_TRIGGERS) +
         ". Does NOT require Auto-trade.",
       inputSchema: z.object({
@@ -343,9 +354,11 @@ export function createDeskTools(userId: string) {
             "day_gain_pct",
             "price_below",
             "price_above",
+            "profit_usd_above",
+            "profit_pct_above",
           ])
           .describe(
-            "Matches the Add modal When dropdown: day_drop_pct (day ≤ −value%), day_gain_pct (day ≥ +value%), price_below / price_above",
+            "When rule: day_drop_pct (day ≤ −value%), day_gain_pct (day ≥ +value%), price_below / price_above, profit_usd_above (sell: profit ≥ $value on your lot), profit_pct_above (sell: profit ≥ value%)",
           ),
         value: z
           .number()
@@ -394,9 +407,10 @@ export function createDeskTools(userId: string) {
         try {
           const verified = await verifyTradableSymbolDetailed(symbol, exchange);
           const size = normalizeNotionalUsd(notionalUsd);
-          const [existing, book] = await Promise.all([
+          const [existing, book, settings] = await Promise.all([
             listUserTriggers(userId),
             loadTriggerBookContext(userId),
+            getDeskSettings(userId),
           ]);
           const readiness = validateTriggerCreate({
             symbol: verified.symbol,
@@ -405,6 +419,7 @@ export function createDeskTools(userId: string) {
             notionalUsd: size,
             existing,
             book,
+            guardrails: settings,
           });
           if (!readiness.ok) {
             return { ok: false, error: readiness.error, limitHit: false };
@@ -441,7 +456,7 @@ export function createDeskTools(userId: string) {
 
     updateTrigger: tool({
       description:
-        "Edit an existing trigger (listTriggers first when unsure). Pass triggerId, or symbol when exactly one rule matches. Updates condition, action, size, autoPauseAfterFire, or enabled. If several rules share a ticker, returns candidates — ask which one or pass triggerId. Rejects duplicates and buy+sell conflicts on the same symbol.",
+        "Edit an existing trigger (listTriggers first when unsure). Pass triggerId, or symbol when exactly one rule matches. Updates condition, action, size, autoPauseAfterFire, or enabled. If several rules share a ticker, returns candidates — ask which one or pass triggerId. Rejects duplicates and day-drop buy+sell collision.",
       inputSchema: z.object({
         triggerId: z.string().optional(),
         symbol: z
@@ -454,6 +469,8 @@ export function createDeskTools(userId: string) {
             "day_gain_pct",
             "price_below",
             "price_above",
+            "profit_usd_above",
+            "profit_pct_above",
           ])
           .optional(),
         value: z.number().optional(),
@@ -533,7 +550,10 @@ export function createDeskTools(userId: string) {
             ? input.autoPauseAfterFire
             : target.autoPauseAfterFire;
 
-        const book = await loadTriggerBookContext(userId);
+        const [book, settings] = await Promise.all([
+          loadTriggerBookContext(userId),
+          getDeskSettings(userId),
+        ]);
         const readiness = validateTriggerUpdate({
           triggerId: target.id,
           symbol: target.symbol,
@@ -543,6 +563,7 @@ export function createDeskTools(userId: string) {
           enabled: nextEnabled,
           existing,
           book,
+          guardrails: settings,
         });
         if (!readiness.ok) {
           return { ok: false, error: readiness.error };
@@ -570,7 +591,7 @@ export function createDeskTools(userId: string) {
 
     setTriggerEnabled: tool({
       description:
-        "Enable or disable an existing Trigger by id (from listTriggers). Enabling re-checks ownership (paper_sell), cash (paper_buy), and buy/sell conflicts.",
+        "Enable or disable an existing Trigger by id (from listTriggers). Enabling re-checks cash, guardrails, duplicates, and dip collisions.",
       inputSchema: z.object({
         triggerId: z.string(),
         enabled: z.boolean(),
@@ -582,11 +603,15 @@ export function createDeskTools(userId: string) {
           if (!current) {
             return { ok: false, error: "Trigger not found" };
           }
-          const book = await loadTriggerBookContext(userId);
+          const [book, settings] = await Promise.all([
+            loadTriggerBookContext(userId),
+            getDeskSettings(userId),
+          ]);
           const readiness = validateTriggerEnable({
             trigger: current,
             existing,
             book,
+            guardrails: settings,
           });
           if (!readiness.ok) {
             return { ok: false, error: readiness.error };

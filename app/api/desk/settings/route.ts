@@ -12,6 +12,7 @@ import {
   disableAutoTrade,
   enableAutoTrade,
   getDeskSettings,
+  saveDeskSettings,
 } from "@/lib/desk-settings-store";
 import { logger } from "@/lib/logger";
 
@@ -31,9 +32,14 @@ export async function GET() {
 }
 
 type PatchBody = {
-  action?: "enable" | "disable";
+  action?: "enable" | "disable" | "updateGuardrails";
   quizAnswers?: QuizAnswers;
   agreed?: boolean;
+  guardrailsEnabled?: boolean;
+  maxSymbolExposureUsd?: number;
+  maxTriggerBuysPerDay?: number;
+  maxTriggerSpendPerDayUsd?: number;
+  pauseTriggerBuysWhenBookDownPct?: number;
 };
 
 export async function PATCH(request: Request) {
@@ -53,6 +59,27 @@ export async function PATCH(request: Request) {
         kind: "auto-disabled",
         text: chip.text,
         hint: chip.hint,
+      });
+      return NextResponse.json({ ok: true, settings });
+    }
+
+    if (action === "updateGuardrails") {
+      const current = await getDeskSettings(userId);
+      const settings = await saveDeskSettings(userId, {
+        ...current,
+        guardrailsEnabled:
+          typeof body.guardrailsEnabled === "boolean"
+            ? body.guardrailsEnabled
+            : current.guardrailsEnabled,
+        maxSymbolExposureUsd:
+          body.maxSymbolExposureUsd ?? current.maxSymbolExposureUsd,
+        maxTriggerBuysPerDay:
+          body.maxTriggerBuysPerDay ?? current.maxTriggerBuysPerDay,
+        maxTriggerSpendPerDayUsd:
+          body.maxTriggerSpendPerDayUsd ?? current.maxTriggerSpendPerDayUsd,
+        pauseTriggerBuysWhenBookDownPct:
+          body.pauseTriggerBuysWhenBookDownPct ??
+          current.pauseTriggerBuysWhenBookDownPct,
       });
       return NextResponse.json({ ok: true, settings });
     }

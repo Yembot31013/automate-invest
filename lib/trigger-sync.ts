@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { getPortfolioSummary } from "@/lib/paper";
 import { getPaperCash, getPaperPositions } from "@/lib/redis";
 import {
   listUserTriggers,
@@ -11,6 +12,24 @@ import {
 } from "@/lib/trigger-validate";
 
 export async function loadTriggerBookContext(
+  userId: string,
+): Promise<TriggerBookContext> {
+  const portfolio = await getPortfolioSummary(userId);
+  return {
+    cash: portfolio.cash,
+    openSymbols: normalizeOpenSymbols(portfolio.positions),
+    positions: portfolio.positions.map((p) => ({
+      symbol: p.symbol,
+      marketValue: p.marketValue,
+      unrealizedPnl: p.unrealizedPnl,
+      unrealizedPnlPct: p.unrealizedPnlPct,
+    })),
+    totalUnrealizedPnlPct: portfolio.totalUnrealizedPnlPct,
+  };
+}
+
+/** Lighter book load when full marks are not needed. */
+export async function loadTriggerBookContextLite(
   userId: string,
 ): Promise<TriggerBookContext> {
   const [cash, positions] = await Promise.all([

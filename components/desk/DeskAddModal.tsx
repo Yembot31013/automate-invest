@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Feedback";
 import {
   DEFAULT_TRIGGER_NOTIONAL_USD,
   defaultAutoPauseAfterFire,
+  isProfitTriggerCondition,
   MAX_TRIGGER_NOTIONAL_USD,
   type TriggerAction,
   type TriggerConditionKind,
@@ -15,7 +16,7 @@ import {
 
 type DeskAddTab = "watchlist" | "trigger";
 
-const CONDITION_OPTIONS: Array<{
+const MARKET_CONDITION_OPTIONS: Array<{
   value: TriggerConditionKind;
   label: string;
   hint: string;
@@ -41,6 +42,37 @@ const CONDITION_OPTIONS: Array<{
     hint: "Fires when mark is at or over this price",
   },
 ];
+
+const PROFIT_CONDITION_OPTIONS: Array<{
+  value: TriggerConditionKind;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "profit_usd_above",
+    label: "Profit ≥ $",
+    hint: "Fires when YOUR open lot profit reaches this USD amount",
+  },
+  {
+    value: "profit_pct_above",
+    label: "Profit ≥ %",
+    hint: "Fires when YOUR open lot profit % reaches this value",
+  },
+];
+
+function conditionOptionsFor(action: TriggerAction) {
+  if (action === "paper_sell") {
+    return [...MARKET_CONDITION_OPTIONS, ...PROFIT_CONDITION_OPTIONS];
+  }
+  return MARKET_CONDITION_OPTIONS;
+}
+
+function thresholdPlaceholder(kind: TriggerConditionKind): string {
+  if (kind === "profit_usd_above") return "28";
+  if (kind === "profit_pct_above") return "5";
+  if (kind === "price_below" || kind === "price_above") return "250";
+  return "3";
+}
 
 const ACTION_OPTIONS: Array<{
   value: TriggerAction;
@@ -160,6 +192,13 @@ export function DeskAddModal({
   const ownsSymbol = openSymbols.some(
     (s) => s.toUpperCase() === symbol.trim().toUpperCase(),
   );
+  const conditionOptions = conditionOptionsFor(triggerAction);
+  const selectedCondition = conditionOptions.find((o) => o.value === triggerKind);
+  const canArmSellAhead =
+    triggerAction === "paper_sell" &&
+    (isProfitTriggerCondition(triggerKind) ||
+      triggerKind === "day_gain_pct" ||
+      triggerKind === "price_above");
 
   async function submitWatchlist(e: React.FormEvent) {
     e.preventDefault();
@@ -341,9 +380,12 @@ export function DeskAddModal({
                     id="desk-add-kind"
                     aria-label="Trigger condition"
                     value={triggerKind}
-                    options={CONDITION_OPTIONS}
+                    options={conditionOptions}
                     disabled={busyTrigger}
-                    onChange={setTriggerKind}
+                    onChange={(next) => {
+                      setTriggerKind(next);
+                      setTriggerValue(thresholdPlaceholder(next));
+                    }}
                   />
                 </div>
                 <div>
@@ -358,7 +400,7 @@ export function DeskAddModal({
                       if (localError) setLocalError(null);
                     }}
                     inputMode="decimal"
-                    placeholder="3"
+                    placeholder={thresholdPlaceholder(triggerKind)}
                     disabled={busyTrigger}
                     className="soft-field"
                   />
@@ -377,6 +419,17 @@ export function DeskAddModal({
                 onChange={(next) => {
                   setTriggerAction(next);
                   setAutoPauseAfterFire(defaultAutoPauseAfterFire(next));
+                  if (
+                    next !== "paper_sell" &&
+                    isProfitTriggerCondition(triggerKind)
+                  ) {
+                    setTriggerKind("day_drop_pct");
+                    setTriggerValue("3");
+                  }
+                  if (next === "paper_sell" && triggerKind === "day_drop_pct") {
+                    setTriggerKind("day_gain_pct");
+                    setTriggerValue("8");
+                  }
                 }}
               />
 
@@ -393,6 +446,10 @@ export function DeskAddModal({
                 When on, the rule turns off after a successful fire (24h cooldown
                 still applies if left armed).
               </p>
+
+              {selectedCondition ? (
+                <p className="desk-add-hint">{selectedCondition.hint}</p>
+              ) : null}
 
               {triggerAction === "paper_buy" ? (
                 <>
@@ -423,15 +480,19 @@ export function DeskAddModal({
               {triggerAction === "paper_sell" ? (
                 <p
                   className={
-                    symbol.trim() && !ownsSymbol
+                    symbol.trim() && !ownsSymbol && !canArmSellAhead
                       ? "desk-add-warn"
                       : "desk-add-hint"
                   }
                   role="status"
                 >
-                  {symbol.trim() && !ownsSymbol
-                    ? `No open lot in ${symbol.trim().toUpperCase()} — paper sell needs a holding.`
-                    : "Closes all open paper lots for this ticker when the rule hits."}
+                  {symbol.trim() && !ownsSymbol && !canArmSellAhead
+                    ? `No open lot in ${symbol.trim().toUpperCase()} — this sell rule needs a holding, or pick take-profit (day gain / profit ≥).`
+                    : isProfitTriggerCondition(triggerKind)
+                      ? "Uses your open lot's unrealized profit, not today's market %. Closes all lots for this ticker."
+                      : canArmSellAhead && !ownsSymbol
+                        ? "You can arm this take-profit ahead — it stays paused until you hold the name."
+                        : "Closes all open paper lots for this ticker when the rule hits."}
                 </p>
               ) : null}
 

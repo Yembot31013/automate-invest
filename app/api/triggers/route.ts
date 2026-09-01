@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { MarketDataError, verifyTradableSymbolDetailed } from "@/lib/market";
 import { MAX_USER_TRIGGERS } from "@/lib/limits";
 import { logger } from "@/lib/logger";
+import { getDeskSettings } from "@/lib/desk-settings-store";
 import { loadTriggerBookContext } from "@/lib/trigger-sync";
 import {
   TriggerValidationError,
@@ -93,9 +94,10 @@ export async function POST(request: Request) {
     );
 
     const notionalUsd = normalizeNotionalUsd(body.notionalUsd);
-    const [existing, book] = await Promise.all([
+    const [existing, book, settings] = await Promise.all([
       listUserTriggers(userId),
       loadTriggerBookContext(userId),
+      getDeskSettings(userId),
     ]);
     const readiness = validateTriggerCreate({
       symbol: verified.symbol,
@@ -104,6 +106,7 @@ export async function POST(request: Request) {
       notionalUsd,
       existing,
       book,
+      guardrails: settings,
     });
     if (!readiness.ok) {
       return NextResponse.json(
@@ -207,6 +210,7 @@ export async function PATCH(request: Request) {
         : current.autoPauseAfterFire;
 
     const book = await loadTriggerBookContext(userId);
+    const settings = await getDeskSettings(userId);
     const readiness = validateTriggerUpdate({
       triggerId: id,
       symbol: current.symbol,
@@ -216,6 +220,7 @@ export async function PATCH(request: Request) {
       enabled: nextEnabled,
       existing,
       book,
+      guardrails: settings,
     });
     if (!readiness.ok) {
       return NextResponse.json(
@@ -236,6 +241,7 @@ export async function PATCH(request: Request) {
         trigger: { ...current, enabled: true },
         existing,
         book,
+        guardrails: settings,
       });
       if (!enableCheck.ok) {
         return NextResponse.json(

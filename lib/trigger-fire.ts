@@ -1,4 +1,5 @@
 import { getClerkUserEmail } from "@/lib/clerk-user";
+import { getDeskSettings } from "@/lib/desk-settings-store";
 import {
   triggerAttentionCopy,
   triggerBuyCopy,
@@ -11,11 +12,15 @@ import { logger } from "@/lib/logger";
 import { getPortfolioSummary, paperBuy, paperSellMany } from "@/lib/paper";
 import {
   getSymbolTriggerUsers,
+  incrementTriggerBuyStatsToday,
   markTriggerFired,
   wasTriggerFiredRecently,
+  getTriggerBuyStatsToday,
 } from "@/lib/redis";
+import { shouldBlockTriggerBuyFire } from "@/lib/trigger-guardrails";
 import {
   listEnabledTriggersForSymbol,
+  listUserTriggers,
   setUserTriggerEnabled,
   touchTriggerFired,
 } from "@/lib/triggers-store";
@@ -24,6 +29,7 @@ import {
   formatTriggerSummary,
   triggerConditionMet,
   type DeskTrigger,
+  type TriggerPositionContext,
 } from "@/lib/triggers";
 import type { AlertPayload, MarketSnapshot } from "@/types";
 
@@ -38,6 +44,38 @@ function snapshotAsAlert(
     title: `Trigger · ${trigger.symbol}`,
     description: `Your rule hit: ${cond}. Action: ${trigger.action}. Mark ~$${snapshot.currentPrice.toFixed(2)} (${snapshot.changePct >= 0 ? "+" : ""}${snapshot.changePct.toFixed(2)}% day).`,
   };
+}
+
+function symbolMatch(a: string, b: string): boolean {
+  const left = a.trim().toUpperCase();
+  const right = b.trim().toUpperCase();
+  if (left === right) return true;
+  return left.replaceAll("/", "") === right.replaceAll("/", "");
+}
+
+function positionForSymbol(
+  positions: ReadonlyArray<{
+    symbol: string;
+    unrealizedPnl: number;
+    unrealizedPnlPct: number;
+  }>,
+  symbol: string,
+): TriggerPositionContext | null {
+  const pos = positions.find((p) => symbolMatch(p.symbol, symbol));
+  if (!pos) return null;
+  return {
+    unrealizedPnl: pos.unrealizedPnl,
+    unrealizedPnlPct: pos.unrealizedPnlPct,
+  };
+}
+
+function triggerFireOrder(a: DeskTrigger, b: DeskTrigger): number {
+  const rank = (t: DeskTrigger) => {
+    if (t.action === "paper_sell") return 0;
+    if (t.action === "paper_buy") return 1;
+    return 2;
+  };
+  return rank(a) - rank(b);
 }
 
 async function maybeAutoPauseTriggerAfterFire(
@@ -98,8 +136,27 @@ async function fireTriggerAction(params: {
   userId: string;
   trigger: DeskTrigger;
   snapshot: MarketSnapshot;
+  position: TriggerPositionContext | null;
+  allTriggers: ReadonlyArray<DeskTrigger>;
+  buysToday: { count: number; spendUsd: number };
+  totalUnrealizedPnlPct: number;
+  positions: ReadonlyArray<{
+    symbol: string;
+    marketValue: number;
+    unrealizedPnl: number;
+    unrealizedPnlPct: number;
+  }>;
 }): Promise<void> {
-  const { userId, trigger, snapshot } = params;
+  const {
+    userId,
+    trigger,
+    snapshot,
+    position,
+    allTriggers,
+    buysToday,
+    totalUnrealizedPnlPct,
+    positions,
+  } = params;
   const triggerTape = tapeFromSnapshot(snapshot);
 
   if (trigger.action === "attention") {
@@ -109,6 +166,37 @@ async function fireTriggerAction(params: {
   }
 
   if (trigger.action === "paper_buy") {
+    const settings = await getDeskSettings(userId);
+    const block = shouldBlockTriggerBuyFire({
+      settings,
+      symbol: trigger.symbol,
+      notionalUsd: trigger.notionalUsd,
+      triggers: allTriggers,
+      positions,
+      totalUnrealizedPnlPct,
+      buysToday,
+    });
+    if (block.blocked) {
+      const chip = triggerSkipCopy({
+        symbol: trigger.symbol,
+        message: block.reason,
+      });
+      await appendDeskEvent(userId, {
+        kind: "trigger-skip",
+        text: chip.text,
+        hint: chip.hint,
+        symbol: trigger.symbol,
+        tape: triggerTape,
+      });
+      await notifyTriggerAttention({
+        userId,
+        trigger,
+        snapshot,
+        extra: block.reason,
+      });
+      return;
+    }
+
     try {
       const qty = Math.max(
         0.0001,
@@ -122,6 +210,7 @@ async function fireTriggerAction(params: {
         entryPrice: snapshot.currentPrice,
         notes: `trigger:${trigger.id}`,
       });
+      await incrementTriggerBuyStatsToday(userId, trigger.notionalUsd);
       const chip = triggerBuyCopy({
         symbol: trigger.symbol,
         qty,
@@ -167,13 +256,7 @@ async function fireTriggerAction(params: {
 
   // paper_sell
   try {
-    const portfolio = await getPortfolioSummary(userId);
-    const owned = portfolio.positions.some(
-      (p) =>
-        p.symbol === trigger.symbol ||
-        p.symbol.replaceAll("/", "") === trigger.symbol.replaceAll("/", ""),
-    );
-    if (!owned) {
+    if (!position) {
       const chip = triggerSkipCopy({
         symbol: trigger.symbol,
         message: "no open lot",
@@ -189,7 +272,7 @@ async function fireTriggerAction(params: {
         userId,
         trigger,
         snapshot,
-        extra: "Rule wanted a sell, but you don’t hold that name.",
+        extra: "Rule wanted a sell, but you don't hold that name.",
       });
       return;
     }
@@ -257,15 +340,43 @@ export async function runTriggersAgainstSnapshot(params: {
   const fired: string[] = [];
 
   for (const uid of userIds) {
-    const triggers = await listEnabledTriggersForSymbol(uid, snapshot.symbol);
-    for (const trigger of triggers) {
-      if (!triggerConditionMet(trigger.condition, snapshot)) continue;
+    const [triggers, portfolio, buysToday] = await Promise.all([
+      listEnabledTriggersForSymbol(uid, snapshot.symbol),
+      getPortfolioSummary(uid),
+      getTriggerBuyStatsToday(uid),
+    ]);
+    const allTriggers = await listUserTriggers(uid);
+    const positions = portfolio.positions.map((p) => ({
+      symbol: p.symbol,
+      marketValue: p.marketValue,
+      unrealizedPnl: p.unrealizedPnl,
+      unrealizedPnlPct: p.unrealizedPnlPct,
+    }));
+    const position = positionForSymbol(positions, snapshot.symbol);
+
+    const sorted = [...triggers].sort(triggerFireOrder);
+
+    for (const trigger of sorted) {
+      if (
+        !triggerConditionMet(trigger.condition, snapshot, position)
+      ) {
+        continue;
+      }
       if (await wasTriggerFiredRecently(uid, trigger.id)) {
         fired.push(`${uid}:${trigger.id}:suppressed`);
         continue;
       }
       try {
-        await fireTriggerAction({ userId: uid, trigger, snapshot });
+        await fireTriggerAction({
+          userId: uid,
+          trigger,
+          snapshot,
+          position,
+          allTriggers,
+          buysToday,
+          totalUnrealizedPnlPct: portfolio.totalUnrealizedPnlPct,
+          positions,
+        });
         await markTriggerFired(uid, trigger.id);
         await touchTriggerFired(uid, trigger.id);
         fired.push(`${uid}:${trigger.id}`);

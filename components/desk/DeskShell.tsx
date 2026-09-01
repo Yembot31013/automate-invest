@@ -11,6 +11,7 @@ import { Sparkline } from "@/components/desk/Sparkline";
 import { TradingViewModal } from "@/components/desk/TradingViewModal";
 import { OnboardingModal } from "@/components/desk/OnboardingModal";
 import { AutoTradeEnableModal } from "@/components/desk/AutoTradeEnableModal";
+import { TriggerGuardrailsModal } from "@/components/desk/TriggerGuardrailsModal";
 import { DeskAddModal } from "@/components/desk/DeskAddModal";
 import { DeskTriggerDetailModal } from "@/components/desk/DeskTriggerDetailModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -181,6 +182,10 @@ export function DeskShell() {
   const [composerFocusKey, setComposerFocusKey] = useState(0);
   const [chatRefreshKey, setChatRefreshKey] = useState(0);
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
+  const [deskSettings, setDeskSettings] = useState<DeskSettings | null>(null);
+  const [guardrailsModalOpen, setGuardrailsModalOpen] = useState(false);
+  const [guardrailsBusy, setGuardrailsBusy] = useState(false);
+  const [guardrailsError, setGuardrailsError] = useState<string | null>(null);
   const [autoTradeModalOpen, setAutoTradeModalOpen] = useState(false);
   const [autoTradeBusy, setAutoTradeBusy] = useState(false);
   const [autoTradeError, setAutoTradeError] = useState<string | null>(null);
@@ -206,6 +211,7 @@ export function DeskShell() {
       if (!res.ok) return;
       const data = (await res.json()) as { settings?: DeskSettings };
       if (data.settings) {
+        setDeskSettings(data.settings);
         setAutoTradeEnabled(Boolean(data.settings.autoTradeEnabled));
       }
     } catch {
@@ -432,6 +438,41 @@ export function DeskShell() {
       showToast({ kind: "warn", message: `Scan didn't finish: ${message}` });
     } finally {
       setBusyScan(false);
+    }
+  }
+
+  async function saveGuardrails(patch: {
+    guardrailsEnabled: boolean;
+    maxSymbolExposureUsd: number;
+    maxTriggerBuysPerDay: number;
+    maxTriggerSpendPerDayUsd: number;
+    pauseTriggerBuysWhenBookDownPct: number;
+  }): Promise<boolean> {
+    setGuardrailsBusy(true);
+    setGuardrailsError(null);
+    try {
+      const res = await fetch("/api/desk/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateGuardrails", ...patch }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        settings?: DeskSettings;
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.settings) {
+        setGuardrailsError(data.error ?? "Couldn't save guardrails.");
+        return false;
+      }
+      setDeskSettings(data.settings);
+      setActivityLog((prev) => ["Guardrails updated", ...prev].slice(0, 12));
+      return true;
+    } catch {
+      setGuardrailsError("Couldn't save guardrails.");
+      return false;
+    } finally {
+      setGuardrailsBusy(false);
     }
   }
 
@@ -973,6 +1014,23 @@ export function DeskShell() {
               {autoTradeEnabled ? "Auto on" : "Auto-trade"}
             </button>
           </Tip>
+          <Tip label="Trigger buy limits — exposure per stock, daily spend, bad-day pause">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setGuardrailsError(null);
+                setGuardrailsModalOpen(true);
+              }}
+              className={`badge-pill !px-3 !py-1.5 text-xs font-bold ${
+                deskSettings?.guardrailsEnabled
+                  ? "bg-[color-mix(in_srgb,var(--yellow)_35%,var(--mix))] text-[var(--ink)]"
+                  : "bg-[color-mix(in_srgb,var(--mix)_80%,transparent)] text-[var(--ink)]"
+              }`}
+            >
+              {deskSettings?.guardrailsEnabled ? "Guardrails on" : "Guardrails"}
+            </button>
+          </Tip>
           <Tip label="Reload prices, headlines, and paper PnL">
             <button
               type="button"
@@ -1452,6 +1510,19 @@ export function DeskShell() {
         }}
         onAddWatchlist={addSymbol}
         onAddTrigger={createTrigger}
+      />
+
+      <TriggerGuardrailsModal
+        open={guardrailsModalOpen}
+        busy={guardrailsBusy}
+        error={guardrailsError}
+        settings={deskSettings}
+        onClose={() => {
+          if (guardrailsBusy) return;
+          setGuardrailsModalOpen(false);
+          setGuardrailsError(null);
+        }}
+        onSave={saveGuardrails}
       />
 
       <AutoTradeEnableModal

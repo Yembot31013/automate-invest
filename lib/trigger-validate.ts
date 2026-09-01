@@ -1,12 +1,25 @@
-import type {
-  DeskTrigger,
-  TriggerAction,
-  TriggerCondition,
-} from "@/lib/triggers";
+import {
+  isProfitTriggerCondition,
+  validateConditionActionPair,
+  type DeskTrigger,
+  type TriggerAction,
+  type TriggerCondition,
+} from "./triggers.ts";
+import {
+  validateTriggerGuardrails,
+  type TriggerGuardrailSettings,
+} from "./trigger-guardrails.ts";
 
 export type TriggerBookContext = {
   cash: number;
   openSymbols: string[];
+  positions?: ReadonlyArray<{
+    symbol: string;
+    marketValue: number;
+    unrealizedPnl: number;
+    unrealizedPnlPct: number;
+  }>;
+  totalUnrealizedPnlPct?: number;
 };
 
 export class TriggerValidationError extends Error {
@@ -69,14 +82,21 @@ export function findDuplicateTrigger(
 }
 
 /**
- * Opposing paper trade on the same name (buy vs sell) — only among enabled
- * rules, or the candidate if it would be enabled.
+ * Both sides armed on day-drop buy + sell — can fire on the same red scan.
+ * Brackets like dip buy + take-profit (day gain or profit %) are allowed.
  */
-export function findOpposingTradeTrigger(
+export function findSameDayDropCollision(
   existing: ReadonlyArray<DeskTrigger>,
-  candidate: { symbol: string; action: TriggerAction },
+  candidate: {
+    symbol: string;
+    action: TriggerAction;
+    condition: TriggerCondition;
+    enabled?: boolean;
+  },
   excludeId?: string,
 ): DeskTrigger | null {
+  if (candidate.enabled === false) return null;
+  if (candidate.condition.kind !== "day_drop_pct") return null;
   if (candidate.action !== "paper_buy" && candidate.action !== "paper_sell") {
     return null;
   }
@@ -89,6 +109,7 @@ export function findOpposingTradeTrigger(
         t.id !== excludeId &&
         t.enabled &&
         t.action === opposite &&
+        t.condition.kind === "day_drop_pct" &&
         triggerSymbolsMatch(t.symbol, symbol),
     ) ?? null
   );
@@ -98,14 +119,22 @@ export function validateTriggerAgainstBook(params: {
   action: TriggerAction;
   symbol: string;
   notionalUsd: number;
+  condition: TriggerCondition;
   book: TriggerBookContext;
 }): { ok: true } | { ok: false; error: string } {
-  const { action, symbol, notionalUsd, book } = params;
+  const { action, symbol, notionalUsd, condition, book } = params;
+  const pair = validateConditionActionPair(action, condition);
+  if (!pair.ok) return pair;
+
   if (action === "paper_sell") {
-    if (!bookOwnsSymbol(book, symbol)) {
+    const canArmAhead =
+      isProfitTriggerCondition(condition.kind) ||
+      condition.kind === "day_gain_pct" ||
+      condition.kind === "price_above";
+    if (!canArmAhead && !bookOwnsSymbol(book, symbol)) {
       return {
         ok: false,
-        error: `No open paper lot in ${symbol.trim().toUpperCase()} — buy some first, or pick Alert me / Paper buy.`,
+        error: `No open paper lot in ${symbol.trim().toUpperCase()} — buy some first, or pick take-profit / profit ≥ / Alert me.`,
       };
     }
   }
@@ -120,7 +149,66 @@ export function validateTriggerAgainstBook(params: {
   return { ok: true };
 }
 
-/** Create-time checks: book + duplicates + buy/sell conflict. */
+function runCreateChecks(params: {
+  symbol: string;
+  condition: TriggerCondition;
+  action: TriggerAction;
+  notionalUsd: number;
+  enabled?: boolean;
+  existing: ReadonlyArray<DeskTrigger>;
+  book: TriggerBookContext;
+  guardrails?: TriggerGuardrailSettings;
+  excludeId?: string;
+}): { ok: true } | { ok: false; error: string } {
+  const dup = findDuplicateTrigger(params.existing, params, params.excludeId);
+  if (dup) {
+    return {
+      ok: false,
+      error: `That rule already exists for ${dup.symbol} (${dup.enabled ? "on" : "paused"}). Edit or remove it instead.`,
+    };
+  }
+  const dipCollision = findSameDayDropCollision(
+    params.existing,
+    {
+      symbol: params.symbol,
+      action: params.action,
+      condition: params.condition,
+      enabled: params.enabled ?? true,
+    },
+    params.excludeId,
+  );
+  if (dipCollision) {
+    return {
+      ok: false,
+      error: `Collision: ${dipCollision.symbol} already has an enabled day-drop ${dipCollision.action === "paper_buy" ? "buy" : "sell"}. Use take-profit (day gain, profit ≥, or price) on the sell side instead.`,
+    };
+  }
+  const bookCheck = validateTriggerAgainstBook({
+    action: params.action,
+    symbol: params.symbol,
+    notionalUsd: params.notionalUsd,
+    condition: params.condition,
+    book: params.book,
+  });
+  if (!bookCheck.ok) return bookCheck;
+
+  if (params.guardrails) {
+    const guard = validateTriggerGuardrails({
+      settings: params.guardrails,
+      symbol: params.symbol,
+      action: params.action,
+      notionalUsd: params.notionalUsd,
+      triggers: params.existing,
+      positions: params.book.positions,
+      excludeTriggerId: params.excludeId,
+    });
+    if (!guard.ok) return guard;
+  }
+
+  return { ok: true };
+}
+
+/** Create-time checks: book + duplicates + dip collision + guardrails. */
 export function validateTriggerCreate(params: {
   symbol: string;
   condition: TriggerCondition;
@@ -128,22 +216,9 @@ export function validateTriggerCreate(params: {
   notionalUsd: number;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
+  guardrails?: TriggerGuardrailSettings;
 }): { ok: true } | { ok: false; error: string } {
-  const dup = findDuplicateTrigger(params.existing, params);
-  if (dup) {
-    return {
-      ok: false,
-      error: `That rule already exists for ${dup.symbol} (${dup.enabled ? "on" : "paused"}). Edit or remove it instead.`,
-    };
-  }
-  const oppose = findOpposingTradeTrigger(params.existing, params);
-  if (oppose) {
-    return {
-      ok: false,
-      error: `Conflict: ${oppose.symbol} already has an enabled ${oppose.action === "paper_buy" ? "paper buy" : "paper sell"} trigger. Pause or remove it first.`,
-    };
-  }
-  return validateTriggerAgainstBook(params);
+  return runCreateChecks({ ...params, enabled: true });
 }
 
 /** Re-run when turning a trigger back on or editing an armed rule. */
@@ -151,24 +226,19 @@ export function validateTriggerEnable(params: {
   trigger: DeskTrigger;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
+  guardrails?: TriggerGuardrailSettings;
 }): { ok: true } | { ok: false; error: string } {
-  const { trigger, existing, book } = params;
-  const oppose = findOpposingTradeTrigger(
-    existing,
-    { symbol: trigger.symbol, action: trigger.action },
-    trigger.id,
-  );
-  if (oppose) {
-    return {
-      ok: false,
-      error: `Conflict: ${oppose.symbol} already has an enabled ${oppose.action === "paper_buy" ? "paper buy" : "paper sell"} trigger. Pause or remove it first.`,
-    };
-  }
-  return validateTriggerAgainstBook({
-    action: trigger.action,
+  const { trigger, existing, book, guardrails } = params;
+  return runCreateChecks({
     symbol: trigger.symbol,
+    condition: trigger.condition,
+    action: trigger.action,
     notionalUsd: trigger.notionalUsd,
+    enabled: true,
+    existing,
     book,
+    guardrails,
+    excludeId: trigger.id,
   });
 }
 
@@ -182,42 +252,24 @@ export function validateTriggerUpdate(params: {
   enabled: boolean;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
+  guardrails?: TriggerGuardrailSettings;
 }): { ok: true } | { ok: false; error: string } {
-  const dup = findDuplicateTrigger(
-    params.existing,
-    {
-      symbol: params.symbol,
-      condition: params.condition,
-      action: params.action,
-    },
-    params.triggerId,
-  );
-  if (dup) {
-    return {
-      ok: false,
-      error: `That rule already exists for ${dup.symbol} (${dup.enabled ? "on" : "paused"}). Edit or remove the other one instead.`,
-    };
+  if (!params.enabled) {
+    const pair = validateConditionActionPair(params.action, params.condition);
+    if (!pair.ok) return pair;
+    return { ok: true };
   }
-  if (params.enabled) {
-    const oppose = findOpposingTradeTrigger(
-      params.existing,
-      { symbol: params.symbol, action: params.action },
-      params.triggerId,
-    );
-    if (oppose) {
-      return {
-        ok: false,
-        error: `Conflict: ${oppose.symbol} already has an enabled ${oppose.action === "paper_buy" ? "paper buy" : "paper sell"} trigger. Pause or remove it first.`,
-      };
-    }
-    return validateTriggerAgainstBook({
-      action: params.action,
-      symbol: params.symbol,
-      notionalUsd: params.notionalUsd,
-      book: params.book,
-    });
-  }
-  return { ok: true };
+  return runCreateChecks({
+    symbol: params.symbol,
+    condition: params.condition,
+    action: params.action,
+    notionalUsd: params.notionalUsd,
+    enabled: true,
+    existing: params.existing,
+    book: params.book,
+    guardrails: params.guardrails,
+    excludeId: params.triggerId,
+  });
 }
 
 /** Which enabled triggers should turn off given the current paper book. */

@@ -9,6 +9,7 @@ import {
   formatTriggerAction,
   formatTriggerCondition,
   formatTriggerNotional,
+  isProfitTriggerCondition,
   type DeskTrigger,
 } from "@/lib/triggers";
 
@@ -33,6 +34,13 @@ function readinessNote(
     (s) => s.toUpperCase() === trigger.symbol.toUpperCase(),
   );
   if (trigger.action === "paper_sell" && !owns) {
+    const canArmAhead =
+      isProfitTriggerCondition(trigger.condition.kind) ||
+      trigger.condition.kind === "day_gain_pct" ||
+      trigger.condition.kind === "price_above";
+    if (canArmAhead) {
+      return "No open lot yet — this take-profit rule stays paused until you hold the name.";
+    }
     return "No open lot — this sell rule will stay paused until you hold the name.";
   }
   if (

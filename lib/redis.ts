@@ -382,6 +382,52 @@ export async function incrementAutoBuyCountToday(
   return next;
 }
 
+function userTriggerBuyDayKey(userId: string, dayKey: string): string {
+  return `user:${userId}:trigger-buys:${dayKey}`;
+}
+
+export type TriggerBuyDayStats = {
+  count: number;
+  spendUsd: number;
+};
+
+/** Trigger paper-buy stats for the current UTC day. */
+export async function getTriggerBuyStatsToday(
+  userId: string,
+): Promise<TriggerBuyDayStats> {
+  const day = new Date().toISOString().slice(0, 10);
+  const raw = await getRedis().get<TriggerBuyDayStats>(
+    userTriggerBuyDayKey(userId, day),
+  );
+  if (!raw || typeof raw !== "object") {
+    return { count: 0, spendUsd: 0 };
+  }
+  const count =
+    typeof raw.count === "number" && Number.isFinite(raw.count)
+      ? raw.count
+      : 0;
+  const spendUsd =
+    typeof raw.spendUsd === "number" && Number.isFinite(raw.spendUsd)
+      ? raw.spendUsd
+      : 0;
+  return { count, spendUsd };
+}
+
+export async function incrementTriggerBuyStatsToday(
+  userId: string,
+  spendUsd: number,
+): Promise<TriggerBuyDayStats> {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = userTriggerBuyDayKey(userId, day);
+  const prev = await getTriggerBuyStatsToday(userId);
+  const next: TriggerBuyDayStats = {
+    count: prev.count + 1,
+    spendUsd: prev.spendUsd + spendUsd,
+  };
+  await getRedis().set(key, next, { ex: 60 * 60 * 36 });
+  return next;
+}
+
 const TRIGGERS_COVERAGE_KEY = "triggers:coverage";
 
 export async function getUserTriggersRaw(

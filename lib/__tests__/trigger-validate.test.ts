@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { buildDeskTrigger } from "../triggers.ts";
 import {
   findDuplicateTrigger,
-  findOpposingTradeTrigger,
+  findSameDayDropCollision,
   triggersToAutoDisable,
   validateTriggerAgainstBook,
   validateTriggerCreate,
@@ -16,19 +16,30 @@ describe("trigger-validate", () => {
   const bookRich = { cash: 50_000, openSymbols: ["AAPL", "TSLA"] };
   const bookBroke = { cash: 100, openSymbols: [] as string[] };
 
-  it("requires an open lot for paper_sell", () => {
+  it("requires an open lot for stop-style paper_sell", () => {
     const miss = validateTriggerAgainstBook({
       action: "paper_sell",
       symbol: "GOOG",
       notionalUsd: 1000,
+      condition: { kind: "price_below", value: 200 },
       book: bookRich,
     });
     assert.equal(miss.ok, false);
+
+    const bracket = validateTriggerAgainstBook({
+      action: "paper_sell",
+      symbol: "GOOG",
+      notionalUsd: 1000,
+      condition: { kind: "day_gain_pct", value: 8 },
+      book: bookRich,
+    });
+    assert.equal(bracket.ok, true);
 
     const hit = validateTriggerAgainstBook({
       action: "paper_sell",
       symbol: "AAPL",
       notionalUsd: 1000,
+      condition: { kind: "price_below", value: 100 },
       book: bookRich,
     });
     assert.equal(hit.ok, true);
@@ -39,6 +50,7 @@ describe("trigger-validate", () => {
       action: "paper_buy",
       symbol: "NVDA",
       notionalUsd: 1000,
+      condition: { kind: "day_drop_pct", value: 3 },
       book: bookBroke,
     });
     assert.equal(miss.ok, false);
@@ -47,6 +59,7 @@ describe("trigger-validate", () => {
       action: "paper_buy",
       symbol: "NVDA",
       notionalUsd: 1000,
+      condition: { kind: "day_drop_pct", value: 3 },
       book: bookRich,
     });
     assert.equal(hit.ok, true);
@@ -79,7 +92,7 @@ describe("trigger-validate", () => {
     assert.equal(create.ok, false);
   });
 
-  it("blocks enabled buy+sell on the same symbol", () => {
+  it("allows bracket buy + take-profit sell on same symbol", () => {
     const existing = [
       buildDeskTrigger({
         symbol: "TSLA",
@@ -88,15 +101,36 @@ describe("trigger-validate", () => {
         notionalUsd: 1000,
       }),
     ];
-    const oppose = findOpposingTradeTrigger(existing, {
+    const create = validateTriggerCreate({
+      symbol: "TSLA",
+      condition: { kind: "day_gain_pct", value: 8 },
+      action: "paper_sell",
+      notionalUsd: 1000,
+      existing,
+      book: bookRich,
+    });
+    assert.equal(create.ok, true);
+  });
+
+  it("blocks day-drop buy + day-drop sell collision", () => {
+    const existing = [
+      buildDeskTrigger({
+        symbol: "TSLA",
+        condition: { kind: "day_drop_pct", value: 2 },
+        action: "paper_buy",
+        notionalUsd: 1000,
+      }),
+    ];
+    const collision = findSameDayDropCollision(existing, {
       symbol: "TSLA",
       action: "paper_sell",
+      condition: { kind: "day_drop_pct", value: 5 },
     });
-    assert.ok(oppose);
+    assert.ok(collision);
 
     const create = validateTriggerCreate({
       symbol: "TSLA",
-      condition: { kind: "day_gain_pct", value: 5 },
+      condition: { kind: "day_drop_pct", value: 5 },
       action: "paper_sell",
       notionalUsd: 1000,
       existing,
@@ -112,12 +146,12 @@ describe("trigger-validate", () => {
       action: "paper_sell",
       enabled: false,
     });
-    const fail = validateTriggerEnable({
+    const okSell = validateTriggerEnable({
       trigger: sell,
       existing: [sell],
       book: bookRich,
     });
-    assert.equal(fail.ok, false);
+    assert.equal(okSell.ok, true);
 
     const buy = buildDeskTrigger({
       symbol: "NVDA",
