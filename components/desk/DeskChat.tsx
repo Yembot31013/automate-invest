@@ -79,6 +79,7 @@ const DESK_MUTATING_TOOLS = new Set([
   "monitorSymbols",
   "unmonitorSymbol",
   "createTrigger",
+  "updateTrigger",
   "setTriggerEnabled",
   "removeTrigger",
   "paperBuy",
@@ -120,6 +121,8 @@ function toolMutationSummary(toolName: string): string {
       return "Ticker removed";
     case "createTrigger":
       return "Trigger armed";
+    case "updateTrigger":
+      return "Trigger updated";
     case "setTriggerEnabled":
       return "Trigger updated";
     case "removeTrigger":

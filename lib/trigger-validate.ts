@@ -146,7 +146,7 @@ export function validateTriggerCreate(params: {
   return validateTriggerAgainstBook(params);
 }
 
-/** Re-run when turning a trigger back on. */
+/** Re-run when turning a trigger back on or editing an armed rule. */
 export function validateTriggerEnable(params: {
   trigger: DeskTrigger;
   existing: ReadonlyArray<DeskTrigger>;
@@ -170,6 +170,54 @@ export function validateTriggerEnable(params: {
     notionalUsd: trigger.notionalUsd,
     book,
   });
+}
+
+/** Edit-time checks — same as create but excludes the trigger being updated. */
+export function validateTriggerUpdate(params: {
+  triggerId: string;
+  symbol: string;
+  condition: TriggerCondition;
+  action: TriggerAction;
+  notionalUsd: number;
+  enabled: boolean;
+  existing: ReadonlyArray<DeskTrigger>;
+  book: TriggerBookContext;
+}): { ok: true } | { ok: false; error: string } {
+  const dup = findDuplicateTrigger(
+    params.existing,
+    {
+      symbol: params.symbol,
+      condition: params.condition,
+      action: params.action,
+    },
+    params.triggerId,
+  );
+  if (dup) {
+    return {
+      ok: false,
+      error: `That rule already exists for ${dup.symbol} (${dup.enabled ? "on" : "paused"}). Edit or remove the other one instead.`,
+    };
+  }
+  if (params.enabled) {
+    const oppose = findOpposingTradeTrigger(
+      params.existing,
+      { symbol: params.symbol, action: params.action },
+      params.triggerId,
+    );
+    if (oppose) {
+      return {
+        ok: false,
+        error: `Conflict: ${oppose.symbol} already has an enabled ${oppose.action === "paper_buy" ? "paper buy" : "paper sell"} trigger. Pause or remove it first.`,
+      };
+    }
+    return validateTriggerAgainstBook({
+      action: params.action,
+      symbol: params.symbol,
+      notionalUsd: params.notionalUsd,
+      book: params.book,
+    });
+  }
+  return { ok: true };
 }
 
 /** Which enabled triggers should turn off given the current paper book. */

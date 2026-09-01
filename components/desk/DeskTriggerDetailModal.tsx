@@ -20,6 +20,7 @@ type DeskTriggerDetailModalProps = {
   openSymbols?: string[];
   onClose: () => void;
   onToggle: (enabled: boolean) => void;
+  onAutoPauseChange: (autoPauseAfterFire: boolean) => void;
   onRemove: () => void;
 };
 
@@ -53,6 +54,7 @@ export function DeskTriggerDetailModal({
   openSymbols = [],
   onClose,
   onToggle,
+  onAutoPauseChange,
   onRemove,
 }: DeskTriggerDetailModalProps) {
   const [mounted, setMounted] = useState(false);
@@ -137,6 +139,20 @@ export function DeskTriggerDetailModal({
               <dd>{lastFired}</dd>
             </div>
           ) : null}
+          <div>
+            <dt>After fire</dt>
+            <dd>
+              <label className="desk-add-check">
+                <input
+                  type="checkbox"
+                  checked={trigger.autoPauseAfterFire}
+                  disabled={busy}
+                  onChange={(e) => onAutoPauseChange(e.target.checked)}
+                />
+                <span>Pause rule after it fires</span>
+              </label>
+            </dd>
+          </div>
         </dl>
 
         {note ? (
@@ -145,7 +161,8 @@ export function DeskTriggerDetailModal({
           </p>
         ) : (
           <p className="desk-add-hint">
-            Checked on cron and Scan now · 24h cooldown after each fire
+            Checked on cron and Scan now · 24h cooldown while armed
+            {trigger.autoPauseAfterFire ? " · auto-pauses after a successful fire" : ""}
           </p>
         )}
 

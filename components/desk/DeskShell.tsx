@@ -510,6 +510,7 @@ export function DeskShell() {
     value: number;
     action: TriggerAction;
     notionalUsd?: number;
+    autoPauseAfterFire?: boolean;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const symbol = input.symbol.trim().toUpperCase();
     if (!symbol) return { ok: false, error: "Enter a ticker first." };
@@ -526,6 +527,7 @@ export function DeskShell() {
           condition: { kind: input.conditionKind, value: input.value },
           action: input.action,
           notionalUsd: input.notionalUsd,
+          autoPauseAfterFire: input.autoPauseAfterFire,
         }),
       });
       const data = (await res.json()) as {
@@ -553,12 +555,22 @@ export function DeskShell() {
   }
 
   async function toggleTrigger(id: string, enabled: boolean) {
+    await patchTrigger(id, { enabled });
+  }
+
+  async function patchTrigger(
+    id: string,
+    patch: {
+      enabled?: boolean;
+      autoPauseAfterFire?: boolean;
+    },
+  ) {
     setBusyTrigger(id);
     try {
       const res = await fetch("/api/triggers", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, enabled }),
+        body: JSON.stringify({ id, ...patch }),
       });
       const data = (await res.json()) as {
         ok?: boolean;
@@ -1514,6 +1526,11 @@ export function DeskShell() {
         onToggle={(enabled) => {
           if (selectedTrigger) {
             void toggleTrigger(selectedTrigger.id, enabled);
+          }
+        }}
+        onAutoPauseChange={(autoPauseAfterFire) => {
+          if (selectedTrigger) {
+            void patchTrigger(selectedTrigger.id, { autoPauseAfterFire });
           }
         }}
         onRemove={() => {

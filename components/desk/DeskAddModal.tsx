@@ -7,6 +7,7 @@ import { DeskSelect } from "@/components/ui/DeskSelect";
 import { Spinner } from "@/components/ui/Feedback";
 import {
   DEFAULT_TRIGGER_NOTIONAL_USD,
+  defaultAutoPauseAfterFire,
   MAX_TRIGGER_NOTIONAL_USD,
   type TriggerAction,
   type TriggerConditionKind,
@@ -86,6 +87,7 @@ type DeskAddModalProps = {
     value: number;
     action: TriggerAction;
     notionalUsd?: number;
+    autoPauseAfterFire?: boolean;
   }) => Promise<{ ok: true } | { ok: false; error: string }>;
 };
 
@@ -113,6 +115,7 @@ export function DeskAddModal({
   const [triggerValue, setTriggerValue] = useState("3");
   const [triggerAction, setTriggerAction] =
     useState<TriggerAction>("attention");
+  const [autoPauseAfterFire, setAutoPauseAfterFire] = useState(false);
   const [notionalUsd, setNotionalUsd] = useState(
     String(DEFAULT_TRIGGER_NOTIONAL_USD),
   );
@@ -131,6 +134,7 @@ export function DeskAddModal({
     setTriggerKind("day_drop_pct");
     setTriggerValue("3");
     setTriggerAction("attention");
+    setAutoPauseAfterFire(false);
     setNotionalUsd(String(DEFAULT_TRIGGER_NOTIONAL_USD));
     setLocalError(null);
   }, [open, initialTab]);
@@ -204,6 +208,7 @@ export function DeskAddModal({
       action: triggerAction,
       notionalUsd:
         triggerAction === "paper_buy" ? Math.round(size) : undefined,
+      autoPauseAfterFire,
     });
     if (result.ok) {
       setSymbol("");
@@ -369,8 +374,25 @@ export function DeskAddModal({
                 value={triggerAction}
                 options={ACTION_OPTIONS}
                 disabled={busyTrigger}
-                onChange={setTriggerAction}
+                onChange={(next) => {
+                  setTriggerAction(next);
+                  setAutoPauseAfterFire(defaultAutoPauseAfterFire(next));
+                }}
               />
+
+              <label className="desk-add-check">
+                <input
+                  type="checkbox"
+                  checked={autoPauseAfterFire}
+                  disabled={busyTrigger}
+                  onChange={(e) => setAutoPauseAfterFire(e.target.checked)}
+                />
+                <span>Pause after it fires once</span>
+              </label>
+              <p className="desk-add-hint">
+                When on, the rule turns off after a successful fire (24h cooldown
+                still applies if left armed).
+              </p>
 
               {triggerAction === "paper_buy" ? (
                 <>

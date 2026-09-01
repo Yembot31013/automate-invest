@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 
 import {
   buildDeskTrigger,
+  defaultAutoPauseAfterFire,
   formatTriggerSummary,
   mergeScanUniverse,
+  normalizeAutoPauseAfterFire,
+  normalizeDeskTrigger,
   normalizeTriggerCondition,
   normalizeTriggerList,
   triggerConditionMet,
@@ -80,6 +83,23 @@ describe("triggers", () => {
       notionalUsd: 2000,
     });
     assert.match(formatTriggerSummary(buy), /Paper buy \$2k/);
+    assert.match(formatTriggerSummary(buy), /pause after fire/);
+  });
+
+  it("defaults autoPauseAfterFire by action", () => {
+    assert.equal(defaultAutoPauseAfterFire("paper_buy"), true);
+    assert.equal(defaultAutoPauseAfterFire("attention"), false);
+    const legacy = normalizeDeskTrigger({
+      symbol: "TSLA",
+      condition: { kind: "day_drop_pct", value: 1 },
+      action: "paper_buy",
+      notionalUsd: 1000,
+    });
+    assert.equal(legacy?.autoPauseAfterFire, true);
+    assert.equal(
+      normalizeAutoPauseAfterFire(false, "paper_buy"),
+      false,
+    );
   });
 });
 

@@ -145,6 +145,7 @@ function toolOutputFailed(toolName: string, output: unknown): boolean {
     toolName === "paperSell" ||
     toolName === "paperSellMany" ||
     toolName === "createTrigger" ||
+    toolName === "updateTrigger" ||
     toolName === "setTriggerEnabled" ||
     toolName === "removeTrigger"
   ) {
@@ -190,6 +191,11 @@ const DEED_COPY: Record<string, DeedCopy> = {
     running: "Arming a trigger…",
     done: "Trigger armed",
     error: "Couldn't create that trigger",
+  },
+  updateTrigger: {
+    running: "Updating a trigger…",
+    done: "Trigger updated",
+    error: "Couldn't update that trigger",
   },
   setTriggerEnabled: {
     running: "Updating a trigger…",
@@ -345,6 +351,13 @@ function deedHint(params: {
       const summary =
         typeof outRec?.summary === "string" ? outRec.summary : null;
       return summary ? `Armed trigger · ${summary}` : "Armed a trigger";
+    }
+    case "updateTrigger": {
+      if (phase === "running") return "Updating a trigger";
+      if (phase === "error") return err ?? "Couldn't update trigger";
+      const summary =
+        typeof outRec?.summary === "string" ? outRec.summary : null;
+      return summary ? `Updated trigger · ${summary}` : "Updated a trigger";
     }
     case "setTriggerEnabled": {
       if (phase === "running") return "Updating a trigger";

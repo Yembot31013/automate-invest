@@ -39,9 +39,12 @@ import {
   listUserTriggers,
   removeUserTrigger,
   setUserTriggerEnabled,
+  updateUserTrigger,
 } from "@/lib/triggers-store";
 import {
+  findTriggersForSymbol,
   formatTriggerSummary,
+  normalizeAutoPauseAfterFire,
   normalizeNotionalUsd,
   normalizeTriggerCondition,
   TRIGGER_CONDITION_HINT,
@@ -54,6 +57,7 @@ import { mapPool } from "@/lib/concurrency";
 import {
   validateTriggerCreate,
   validateTriggerEnable,
+  validateTriggerUpdate,
 } from "@/lib/trigger-validate";
 
 function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
@@ -360,6 +364,12 @@ export function createDeskTools(userId: string) {
           .describe(
             "Paper-buy size in USD (default 1000, max 5000). Required intent for paper_buy — pass the dollar budget they asked for.",
           ),
+        autoPauseAfterFire: z
+          .boolean()
+          .optional()
+          .describe(
+            "When true, rule pauses after it successfully fires. Default on for paper buy/sell, off for alert-only.",
+          ),
       }),
       execute: async ({
         symbol,
@@ -368,6 +378,7 @@ export function createDeskTools(userId: string) {
         value,
         action,
         notionalUsd,
+        autoPauseAfterFire,
       }) => {
         const condition = normalizeTriggerCondition({
           kind: conditionKind,
@@ -404,6 +415,10 @@ export function createDeskTools(userId: string) {
             condition,
             action: action as TriggerAction,
             notionalUsd: size,
+            autoPauseAfterFire: normalizeAutoPauseAfterFire(
+              autoPauseAfterFire,
+              action as TriggerAction,
+            ),
           });
           const triggers = await listUserTriggers(userId);
           return {
@@ -421,6 +436,135 @@ export function createDeskTools(userId: string) {
             limitHit: error instanceof TriggerLimitError,
           };
         }
+      },
+    }),
+
+    updateTrigger: tool({
+      description:
+        "Edit an existing trigger (listTriggers first when unsure). Pass triggerId, or symbol when exactly one rule matches. Updates condition, action, size, autoPauseAfterFire, or enabled. If several rules share a ticker, returns candidates — ask which one or pass triggerId. Rejects duplicates and buy+sell conflicts on the same symbol.",
+      inputSchema: z.object({
+        triggerId: z.string().optional(),
+        symbol: z
+          .string()
+          .optional()
+          .describe("Use when one trigger on this ticker — else pass triggerId"),
+        conditionKind: z
+          .enum([
+            "day_drop_pct",
+            "day_gain_pct",
+            "price_below",
+            "price_above",
+          ])
+          .optional(),
+        value: z.number().optional(),
+        action: z.enum(["attention", "paper_buy", "paper_sell"]).optional(),
+        notionalUsd: z.number().positive().optional(),
+        autoPauseAfterFire: z.boolean().optional(),
+        enabled: z.boolean().optional(),
+      }),
+      execute: async (input) => {
+        const existing = await listUserTriggers(userId);
+        let target = input.triggerId
+          ? existing.find((t) => t.id === input.triggerId)
+          : undefined;
+
+        if (!target && input.symbol?.trim()) {
+          const matches = findTriggersForSymbol(existing, input.symbol);
+          if (matches.length === 0) {
+            return {
+              ok: false,
+              error: `No trigger found for ${input.symbol.trim().toUpperCase()}.`,
+            };
+          }
+          if (matches.length > 1) {
+            return {
+              ok: false,
+              error: `Several triggers on ${input.symbol.trim().toUpperCase()} — pass triggerId.`,
+              candidates: matches.map((t) => ({
+                id: t.id,
+                summary: formatTriggerSummary(t),
+              })),
+            };
+          }
+          target = matches[0];
+        }
+
+        if (!target) {
+          return {
+            ok: false,
+            error: "Pass triggerId or a symbol with exactly one trigger.",
+          };
+        }
+
+        const hasPatch =
+          input.conditionKind !== undefined ||
+          input.value !== undefined ||
+          input.action !== undefined ||
+          input.notionalUsd !== undefined ||
+          input.autoPauseAfterFire !== undefined ||
+          input.enabled !== undefined;
+
+        if (!hasPatch) {
+          return {
+            ok: false,
+            error:
+              "Nothing to change — pass condition, action, notionalUsd, autoPauseAfterFire, or enabled.",
+          };
+        }
+
+        const nextCondition =
+          input.conditionKind !== undefined || input.value !== undefined
+            ? normalizeTriggerCondition({
+                kind: input.conditionKind ?? target.condition.kind,
+                value: input.value ?? target.condition.value,
+              })
+            : target.condition;
+        if (!nextCondition) {
+          return { ok: false, error: TRIGGER_CONDITION_HINT };
+        }
+
+        const nextAction = (input.action ?? target.action) as TriggerAction;
+        const nextNotional = normalizeNotionalUsd(
+          input.notionalUsd ?? target.notionalUsd,
+        );
+        const nextEnabled = input.enabled ?? target.enabled;
+        const nextAutoPause =
+          input.autoPauseAfterFire !== undefined
+            ? input.autoPauseAfterFire
+            : target.autoPauseAfterFire;
+
+        const book = await loadTriggerBookContext(userId);
+        const readiness = validateTriggerUpdate({
+          triggerId: target.id,
+          symbol: target.symbol,
+          condition: nextCondition,
+          action: nextAction,
+          notionalUsd: nextNotional,
+          enabled: nextEnabled,
+          existing,
+          book,
+        });
+        if (!readiness.ok) {
+          return { ok: false, error: readiness.error };
+        }
+
+        const trigger = await updateUserTrigger(userId, target.id, {
+          condition: nextCondition,
+          action: nextAction,
+          notionalUsd: nextNotional,
+          autoPauseAfterFire: nextAutoPause,
+          enabled: nextEnabled,
+        });
+        if (!trigger) {
+          return { ok: false, error: "Trigger not found" };
+        }
+        const triggers = await listUserTriggers(userId);
+        return {
+          ok: true,
+          trigger,
+          summary: formatTriggerSummary(trigger),
+          triggers,
+        };
       },
     }),
 

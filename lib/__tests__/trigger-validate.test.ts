@@ -9,6 +9,7 @@ import {
   validateTriggerAgainstBook,
   validateTriggerCreate,
   validateTriggerEnable,
+  validateTriggerUpdate,
 } from "../trigger-validate.ts";
 
 describe("trigger-validate", () => {
@@ -157,5 +158,25 @@ describe("trigger-validate", () => {
     assert.equal(paused.length, 2);
     assert.ok(paused.some((t) => t.id === sell.id));
     assert.ok(paused.some((t) => t.id === buy.id));
+  });
+
+  it("allows editing without duplicate conflict on self", () => {
+    const rule = buildDeskTrigger({
+      symbol: "TSLA",
+      condition: { kind: "day_drop_pct", value: 1 },
+      action: "paper_buy",
+      notionalUsd: 3660,
+    });
+    const updated = validateTriggerUpdate({
+      triggerId: rule.id,
+      symbol: rule.symbol,
+      condition: { kind: "day_drop_pct", value: 2 },
+      action: rule.action,
+      notionalUsd: rule.notionalUsd,
+      enabled: true,
+      existing: [rule],
+      book: bookRich,
+    });
+    assert.equal(updated.ok, true);
   });
 });

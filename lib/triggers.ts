@@ -24,6 +24,8 @@ export type DeskTrigger = {
   enabled: boolean;
   /** Paper-buy notional in USD when action is paper_buy. */
   notionalUsd: number;
+  /** When true, rule auto-pauses after a successful fire (trade or alert). */
+  autoPauseAfterFire: boolean;
   createdAt: string;
   updatedAt: string;
   lastFiredAt: string | null;
@@ -101,6 +103,34 @@ export function normalizeTriggerAction(raw: unknown): TriggerAction | null {
   return raw as TriggerAction;
 }
 
+export function defaultAutoPauseAfterFire(action: TriggerAction): boolean {
+  return action === "paper_buy" || action === "paper_sell";
+}
+
+export function normalizeAutoPauseAfterFire(
+  raw: unknown,
+  action: TriggerAction,
+): boolean {
+  if (typeof raw === "boolean") return raw;
+  return defaultAutoPauseAfterFire(action);
+}
+
+function triggerSymbolsMatch(a: string, b: string): boolean {
+  const left = a.trim().toUpperCase();
+  const right = b.trim().toUpperCase();
+  if (!left || !right) return false;
+  if (left === right) return true;
+  return left.replaceAll("/", "") === right.replaceAll("/", "");
+}
+
+/** All triggers on a symbol (enabled or paused). */
+export function findTriggersForSymbol(
+  triggers: ReadonlyArray<DeskTrigger>,
+  symbol: string,
+): DeskTrigger[] {
+  return triggers.filter((t) => triggerSymbolsMatch(t.symbol, symbol));
+}
+
 export function normalizeNotionalUsd(raw: unknown): number {
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_TRIGGER_NOTIONAL_USD;
@@ -144,6 +174,7 @@ export function normalizeDeskTrigger(raw: unknown): DeskTrigger | null {
     action,
     enabled: rec.enabled !== false,
     notionalUsd: normalizeNotionalUsd(rec.notionalUsd),
+    autoPauseAfterFire: normalizeAutoPauseAfterFire(rec.autoPauseAfterFire, action),
     createdAt,
     updatedAt,
     lastFiredAt,
@@ -170,16 +201,20 @@ export function buildDeskTrigger(input: {
   action: TriggerAction;
   notionalUsd?: number;
   enabled?: boolean;
+  autoPauseAfterFire?: boolean;
 }): DeskTrigger {
   const now = new Date().toISOString();
+  const action = input.action;
   return {
     id: newTriggerId(),
     symbol: input.symbol.trim().toUpperCase(),
     exchange: (input.exchange ?? "NASDAQ").trim().toUpperCase() || "NASDAQ",
     condition: input.condition,
-    action: input.action,
+    action,
     enabled: input.enabled !== false,
     notionalUsd: normalizeNotionalUsd(input.notionalUsd),
+    autoPauseAfterFire:
+      input.autoPauseAfterFire ?? defaultAutoPauseAfterFire(action),
     createdAt: now,
     updatedAt: now,
     lastFiredAt: null,
@@ -250,7 +285,9 @@ export function formatTriggerActionDetail(trigger: DeskTrigger): string {
 }
 
 export function formatTriggerSummary(trigger: DeskTrigger): string {
-  return `${trigger.symbol} · ${formatTriggerCondition(trigger.condition)} · ${formatTriggerActionDetail(trigger)}${trigger.enabled ? "" : " · off"}`;
+  const pause =
+    trigger.autoPauseAfterFire ? " · pause after fire" : "";
+  return `${trigger.symbol} · ${formatTriggerCondition(trigger.condition)} · ${formatTriggerActionDetail(trigger)}${pause}${trigger.enabled ? "" : " · off"}`;
 }
 
 /** Merge watchlist + trigger coverage symbols (cron must scan trigger-only names). */

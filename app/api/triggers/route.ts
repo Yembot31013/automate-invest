@@ -9,14 +9,16 @@ import {
   TriggerValidationError,
   validateTriggerCreate,
   validateTriggerEnable,
+  validateTriggerUpdate,
 } from "@/lib/trigger-validate";
 import {
   createUserTrigger,
   listUserTriggers,
   removeUserTrigger,
-  setUserTriggerEnabled,
+  updateUserTrigger,
 } from "@/lib/triggers-store";
 import {
+  normalizeAutoPauseAfterFire,
   normalizeNotionalUsd,
   normalizeTriggerAction,
   normalizeTriggerCondition,
@@ -116,6 +118,10 @@ export async function POST(request: Request) {
       condition,
       action,
       notionalUsd,
+      autoPauseAfterFire: normalizeAutoPauseAfterFire(
+        body.autoPauseAfterFire,
+        action,
+      ),
     });
     const triggers = await listUserTriggers(userId);
     return NextResponse.json(
@@ -155,37 +161,99 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    if (typeof body.enabled !== "boolean") {
+
+    const existing = await listUserTriggers(userId);
+    const current = existing.find((t) => t.id === id);
+    if (!current) {
       return NextResponse.json(
-        { ok: false, error: "Field 'enabled' (boolean) is required" },
+        { ok: false, error: "Trigger not found" },
+        { status: 404 },
+      );
+    }
+
+    const nextCondition =
+      body.condition !== undefined
+        ? normalizeTriggerCondition(body.condition)
+        : current.condition;
+    const nextAction =
+      body.action !== undefined
+        ? normalizeTriggerAction(body.action)
+        : current.action;
+    if (body.condition !== undefined && !nextCondition) {
+      return NextResponse.json(
+        { ok: false, error: TRIGGER_CONDITION_HINT },
+        { status: 400 },
+      );
+    }
+    if (body.action !== undefined && !nextAction) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid action — use attention, paper_buy, or paper_sell",
+        },
         { status: 400 },
       );
     }
 
-    if (body.enabled) {
-      const existing = await listUserTriggers(userId);
-      const current = existing.find((t) => t.id === id);
-      if (!current) {
-        return NextResponse.json(
-          { ok: false, error: "Trigger not found" },
-          { status: 404 },
-        );
-      }
-      const book = await loadTriggerBookContext(userId);
-      const readiness = validateTriggerEnable({
-        trigger: current,
+    const nextEnabled =
+      typeof body.enabled === "boolean" ? body.enabled : current.enabled;
+    const nextNotional =
+      body.notionalUsd !== undefined
+        ? normalizeNotionalUsd(body.notionalUsd)
+        : current.notionalUsd;
+    const nextAutoPause =
+      body.autoPauseAfterFire !== undefined
+        ? body.autoPauseAfterFire === true
+        : current.autoPauseAfterFire;
+
+    const book = await loadTriggerBookContext(userId);
+    const readiness = validateTriggerUpdate({
+      triggerId: id,
+      symbol: current.symbol,
+      condition: nextCondition!,
+      action: nextAction!,
+      notionalUsd: nextNotional,
+      enabled: nextEnabled,
+      existing,
+      book,
+    });
+    if (!readiness.ok) {
+      return NextResponse.json(
+        { ok: false, error: readiness.error },
+        { status: 400 },
+      );
+    }
+
+    const onlyToggle =
+      body.condition === undefined &&
+      body.action === undefined &&
+      body.notionalUsd === undefined &&
+      body.autoPauseAfterFire === undefined &&
+      typeof body.enabled === "boolean";
+
+    if (onlyToggle && body.enabled === true) {
+      const enableCheck = validateTriggerEnable({
+        trigger: { ...current, enabled: true },
         existing,
         book,
       });
-      if (!readiness.ok) {
+      if (!enableCheck.ok) {
         return NextResponse.json(
-          { ok: false, error: readiness.error },
+          { ok: false, error: enableCheck.error },
           { status: 400 },
         );
       }
     }
 
-    const trigger = await setUserTriggerEnabled(userId, id, body.enabled);
+    const trigger = await updateUserTrigger(userId, id, {
+      enabled: nextEnabled,
+      condition: body.condition !== undefined ? nextCondition! : undefined,
+      action: body.action !== undefined ? nextAction! : undefined,
+      notionalUsd:
+        body.notionalUsd !== undefined ? nextNotional : undefined,
+      autoPauseAfterFire:
+        body.autoPauseAfterFire !== undefined ? nextAutoPause : undefined,
+    });
     if (!trigger) {
       return NextResponse.json(
         { ok: false, error: "Trigger not found" },

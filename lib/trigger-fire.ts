@@ -16,6 +16,7 @@ import {
 } from "@/lib/redis";
 import {
   listEnabledTriggersForSymbol,
+  setUserTriggerEnabled,
   touchTriggerFired,
 } from "@/lib/triggers-store";
 import {
@@ -37,6 +38,14 @@ function snapshotAsAlert(
     title: `Trigger · ${trigger.symbol}`,
     description: `Your rule hit: ${cond}. Action: ${trigger.action}. Mark ~$${snapshot.currentPrice.toFixed(2)} (${snapshot.changePct >= 0 ? "+" : ""}${snapshot.changePct.toFixed(2)}% day).`,
   };
+}
+
+async function maybeAutoPauseTriggerAfterFire(
+  userId: string,
+  trigger: DeskTrigger,
+): Promise<void> {
+  if (!trigger.autoPauseAfterFire) return;
+  await setUserTriggerEnabled(userId, trigger.id, false);
 }
 
 async function notifyTriggerAttention(params: {
@@ -95,6 +104,7 @@ async function fireTriggerAction(params: {
 
   if (trigger.action === "attention") {
     await notifyTriggerAttention({ userId, trigger, snapshot });
+    await maybeAutoPauseTriggerAfterFire(userId, trigger);
     return;
   }
 
@@ -131,6 +141,7 @@ async function fireTriggerAction(params: {
         snapshot,
         extra: `Paper bought ${qty} · cash left ~$${bought.cashRemaining.toFixed(0)}`,
       });
+      await maybeAutoPauseTriggerAfterFire(userId, trigger);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Buy failed";
       const chip = triggerSkipCopy({
@@ -204,6 +215,7 @@ async function fireTriggerAction(params: {
       snapshot,
       extra: `Paper sold ${sold.closedCount} lot(s) · cash ~$${sold.cashRemaining.toFixed(0)}`,
     });
+    await maybeAutoPauseTriggerAfterFire(userId, trigger);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sell failed";
     const skipChip = triggerSkipCopy({

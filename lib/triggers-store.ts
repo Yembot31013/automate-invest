@@ -51,6 +51,7 @@ export async function createUserTrigger(
     condition: TriggerCondition;
     action: TriggerAction;
     notionalUsd?: number;
+    autoPauseAfterFire?: boolean;
   },
 ): Promise<DeskTrigger> {
   return withUserTriggersLock(userId, async () => {
@@ -64,6 +65,46 @@ export async function createUserTrigger(
       { symbol: trigger.symbol, exchange: trigger.exchange },
     ]);
     return trigger;
+  });
+}
+
+export type UserTriggerPatch = {
+  enabled?: boolean;
+  condition?: TriggerCondition;
+  action?: TriggerAction;
+  notionalUsd?: number;
+  autoPauseAfterFire?: boolean;
+};
+
+export async function updateUserTrigger(
+  userId: string,
+  triggerId: string,
+  patch: UserTriggerPatch,
+): Promise<DeskTrigger | null> {
+  return withUserTriggersLock(userId, async () => {
+    const current = await listUserTriggers(userId);
+    const idx = current.findIndex((t) => t.id === triggerId);
+    if (idx < 0) return null;
+    const prev = current[idx]!;
+    const action = patch.action ?? prev.action;
+    const updated: DeskTrigger = {
+      ...prev,
+      enabled: patch.enabled ?? prev.enabled,
+      condition: patch.condition ?? prev.condition,
+      action,
+      notionalUsd:
+        patch.notionalUsd !== undefined ? patch.notionalUsd : prev.notionalUsd,
+      autoPauseAfterFire:
+        patch.autoPauseAfterFire !== undefined
+          ? patch.autoPauseAfterFire
+          : prev.autoPauseAfterFire,
+      updatedAt: new Date().toISOString(),
+    };
+    const next = current.map((t, i) => (i === idx ? updated : t));
+    await persistAndSyncCoverage(userId, next, [
+      { symbol: updated.symbol, exchange: updated.exchange },
+    ]);
+    return updated;
   });
 }
 

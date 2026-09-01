@@ -1869,6 +1869,21 @@ body {
   color: var(--muted);
 }
 
+.desk-add-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.desk-add-check input {
+  accent-color: var(--yellow);
+}
+
 .desk-add-warn {
   margin: 0.35rem 0 0;
   border-radius: 12px;
