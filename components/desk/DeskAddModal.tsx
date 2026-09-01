@@ -10,8 +10,10 @@ import {
   defaultAutoPauseAfterFire,
   isProfitTriggerCondition,
   MAX_TRIGGER_NOTIONAL_USD,
+  MAX_TRIGGER_SELL_CLOSE_USD,
   type TriggerAction,
   type TriggerConditionKind,
+  type TriggerSellCloseMode,
 } from "@/lib/triggers";
 
 type DeskAddTab = "watchlist" | "trigger";
@@ -92,7 +94,29 @@ const ACTION_OPTIONS: Array<{
   {
     value: "paper_sell",
     label: "Paper sell",
-    hint: "Close all open paper lots for that symbol",
+    hint: "Close all lots or a partial slice when the rule hits",
+  },
+];
+
+const SELL_CLOSE_OPTIONS: Array<{
+  value: TriggerSellCloseMode;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "all",
+    label: "Close all lots",
+    hint: "Flattens every open paper lot for this ticker",
+  },
+  {
+    value: "pct",
+    label: "Close % of newest lot",
+    hint: "Keeps a runner — applies to your most recent open lot",
+  },
+  {
+    value: "usd",
+    label: "Close $ value",
+    hint: "Sells roughly this USD notional from the newest lot",
   },
 ];
 
@@ -119,6 +143,8 @@ type DeskAddModalProps = {
     value: number;
     action: TriggerAction;
     notionalUsd?: number;
+    sellCloseMode?: TriggerSellCloseMode;
+    sellCloseValue?: number;
     autoPauseAfterFire?: boolean;
   }) => Promise<{ ok: true } | { ok: false; error: string }>;
 };
@@ -151,6 +177,9 @@ export function DeskAddModal({
   const [notionalUsd, setNotionalUsd] = useState(
     String(DEFAULT_TRIGGER_NOTIONAL_USD),
   );
+  const [sellCloseMode, setSellCloseMode] =
+    useState<TriggerSellCloseMode>("all");
+  const [sellCloseValue, setSellCloseValue] = useState("50");
   const [localError, setLocalError] = useState<string | null>(null);
   const titleId = useId();
   const busy = busyWatchlist || busyTrigger;
@@ -168,6 +197,8 @@ export function DeskAddModal({
     setTriggerAction("attention");
     setAutoPauseAfterFire(false);
     setNotionalUsd(String(DEFAULT_TRIGGER_NOTIONAL_USD));
+    setSellCloseMode("all");
+    setSellCloseValue("50");
     setLocalError(null);
   }, [open, initialTab]);
 
@@ -223,6 +254,7 @@ export function DeskAddModal({
     const next = symbol.trim().toUpperCase();
     const value = Number(triggerValue);
     const size = Number(notionalUsd);
+    const closeSize = Number(sellCloseValue);
     if (!next) {
       setLocalError("Enter a ticker first.");
       return;
@@ -238,6 +270,20 @@ export function DeskAddModal({
       setLocalError("Enter a paper-buy size in USD.");
       return;
     }
+    if (triggerAction === "paper_sell" && sellCloseMode !== "all") {
+      if (!Number.isFinite(closeSize) || closeSize <= 0) {
+        setLocalError(
+          sellCloseMode === "pct"
+            ? "Enter a close percent (1–99)."
+            : "Enter a close size in USD.",
+        );
+        return;
+      }
+      if (sellCloseMode === "pct" && (closeSize < 1 || closeSize > 99)) {
+        setLocalError("Close percent must be between 1 and 99.");
+        return;
+      }
+    }
     if (busyTrigger || triggersFull) return;
     setLocalError(null);
     const result = await onAddTrigger({
@@ -247,6 +293,12 @@ export function DeskAddModal({
       action: triggerAction,
       notionalUsd:
         triggerAction === "paper_buy" ? Math.round(size) : undefined,
+      sellCloseMode:
+        triggerAction === "paper_sell" ? sellCloseMode : undefined,
+      sellCloseValue:
+        triggerAction === "paper_sell" && sellCloseMode !== "all"
+          ? Math.round(closeSize)
+          : undefined,
       autoPauseAfterFire,
     });
     if (result.ok) {
@@ -478,22 +530,91 @@ export function DeskAddModal({
               ) : null}
 
               {triggerAction === "paper_sell" ? (
-                <p
-                  className={
-                    symbol.trim() && !ownsSymbol && !canArmSellAhead
-                      ? "desk-add-warn"
-                      : "desk-add-hint"
-                  }
-                  role="status"
-                >
-                  {symbol.trim() && !ownsSymbol && !canArmSellAhead
-                    ? `No open lot in ${symbol.trim().toUpperCase()} — this sell rule needs a holding, or pick take-profit (day gain / profit ≥).`
-                    : isProfitTriggerCondition(triggerKind)
-                      ? "Uses your open lot's unrealized profit, not today's market %. Closes all lots for this ticker."
-                      : canArmSellAhead && !ownsSymbol
-                        ? "You can arm this take-profit ahead — it stays paused until you hold the name."
-                        : "Closes all open paper lots for this ticker when the rule hits."}
-                </p>
+                <>
+                  <span className="desk-add-label" id="desk-add-sell-close-label">
+                    Close size
+                  </span>
+                  <DeskSelect
+                    id="desk-add-sell-close"
+                    aria-labelledby="desk-add-sell-close-label"
+                    value={sellCloseMode}
+                    options={SELL_CLOSE_OPTIONS}
+                    disabled={busyTrigger}
+                    onChange={(next) => {
+                      setSellCloseMode(next);
+                      if (localError) setLocalError(null);
+                    }}
+                  />
+                  {sellCloseMode === "pct" ? (
+                    <>
+                      <label
+                        className="desk-add-label"
+                        htmlFor="desk-add-sell-pct"
+                      >
+                        Close percent
+                      </label>
+                      <input
+                        id="desk-add-sell-pct"
+                        value={sellCloseValue}
+                        onChange={(e) => {
+                          setSellCloseValue(e.target.value);
+                          if (localError) setLocalError(null);
+                        }}
+                        inputMode="numeric"
+                        placeholder="50"
+                        disabled={busyTrigger}
+                        className="soft-field"
+                      />
+                      <p className="desk-add-hint">1–99% of your newest lot</p>
+                    </>
+                  ) : null}
+                  {sellCloseMode === "usd" ? (
+                    <>
+                      <label
+                        className="desk-add-label"
+                        htmlFor="desk-add-sell-usd"
+                      >
+                        Close value (USD)
+                      </label>
+                      <input
+                        id="desk-add-sell-usd"
+                        value={sellCloseValue}
+                        onChange={(e) => {
+                          setSellCloseValue(e.target.value);
+                          if (localError) setLocalError(null);
+                        }}
+                        inputMode="numeric"
+                        placeholder="500"
+                        disabled={busyTrigger}
+                        className="soft-field"
+                      />
+                      <p className="desk-add-hint">
+                        Up to ${MAX_TRIGGER_SELL_CLOSE_USD.toLocaleString()} from
+                        newest lot
+                      </p>
+                    </>
+                  ) : null}
+                  <p
+                    className={
+                      symbol.trim() && !ownsSymbol && !canArmSellAhead
+                        ? "desk-add-warn"
+                        : "desk-add-hint"
+                    }
+                    role="status"
+                  >
+                    {symbol.trim() && !ownsSymbol && !canArmSellAhead
+                      ? `No open lot in ${symbol.trim().toUpperCase()} — this sell rule needs a holding, or pick take-profit (day gain / profit ≥).`
+                      : isProfitTriggerCondition(triggerKind)
+                        ? sellCloseMode === "all"
+                          ? "Uses your open lot's unrealized profit, not today's market %. Closes all lots for this ticker."
+                          : "Uses your open lot's unrealized profit. Partial close applies to your newest lot — rest stays open."
+                        : canArmSellAhead && !ownsSymbol
+                          ? "You can arm this take-profit ahead — it stays paused until you hold the name."
+                          : sellCloseMode === "all"
+                            ? "Closes all open paper lots for this ticker when the rule hits."
+                            : "Partial close trims your newest lot — other lots stay open."}
+                  </p>
+                </>
               ) : null}
 
               <p className="desk-add-hint">
@@ -544,7 +665,10 @@ export function DeskAddModal({
                 !symbol.trim() ||
                 triggersFull ||
                 !triggerValue.trim() ||
-                (triggerAction === "paper_buy" && !notionalUsd.trim())
+                (triggerAction === "paper_buy" && !notionalUsd.trim()) ||
+                (triggerAction === "paper_sell" &&
+                  sellCloseMode !== "all" &&
+                  !sellCloseValue.trim())
               }
             >
               {busyTrigger ? (

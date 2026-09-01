@@ -301,6 +301,197 @@ export async function paperSellMany(params: {
   });
 }
 
+export type PaperSellClose =
+  | { mode: "all" }
+  | { mode: "pct"; pct: number }
+  | { mode: "usd"; usd: number };
+
+function findNewestOpenLot(
+  open: PaperPosition[],
+  symbol: string,
+): PaperPosition | undefined {
+  const want = resolveSymbolInput(symbol).symbol;
+  return [...open]
+    .reverse()
+    .find(
+      (p) =>
+        p.symbol === want ||
+        p.symbol.replaceAll("/", "") === want.replaceAll("/", ""),
+    );
+}
+
+/**
+ * Close a symbol for triggers — all lots, or a partial slice of the newest lot.
+ */
+export async function paperSellSymbol(params: {
+  userId: string;
+  symbol: string;
+  close: PaperSellClose;
+}): Promise<{
+  ok: boolean;
+  closedCount: number;
+  closedQty: number;
+  remainingQty: number;
+  partial: boolean;
+  closed: Array<{
+    id: string;
+    symbol: string;
+    quantity: number;
+    exitPrice: number;
+    unrealizedPnl: number;
+    unrealizedPnlPct: number;
+  }>;
+  cashRemaining: number;
+  remainingOpen: number;
+  message?: string;
+}> {
+  if (params.close.mode === "all") {
+    const sold = await paperSellMany({
+      userId: params.userId,
+      symbols: [params.symbol],
+    });
+    const closedQty = sold.closed.reduce((sum, c) => sum + c.quantity, 0);
+    return {
+      ok: sold.ok,
+      closedCount: sold.closedCount,
+      closedQty,
+      remainingQty: 0,
+      partial: false,
+      closed: sold.closed,
+      cashRemaining: sold.cashRemaining,
+      remainingOpen: sold.remainingOpen,
+      message: sold.message,
+    };
+  }
+
+  return withUserPaperLock(params.userId, async () => {
+    const positions = await getPaperPositions(params.userId);
+    const open = positions.filter((p) => p.status === "open");
+    const target = findNewestOpenLot(open, params.symbol);
+
+    if (!target) {
+      const cash = await getPaperCash(params.userId);
+      return {
+        ok: true,
+        closedCount: 0,
+        closedQty: 0,
+        remainingQty: 0,
+        partial: false,
+        closed: [],
+        cashRemaining: Number(cash.toFixed(2)),
+        remainingOpen: open.length,
+        message: "No open paper position found to sell",
+      };
+    }
+
+    const exitPrice = await markPriceFor(target.symbol, target.exchange);
+    let sellQty: number;
+    if (params.close.mode === "pct") {
+      sellQty = (target.quantity * params.close.pct) / 100;
+    } else if (params.close.mode === "usd") {
+      sellQty = params.close.usd / exitPrice;
+    } else {
+      throw new Error("Partial sell requires pct or usd mode");
+    }
+    sellQty = Math.min(target.quantity, sellQty);
+    if (!Number.isFinite(sellQty) || sellQty <= 0) {
+      throw new Error("Partial sell size must be positive");
+    }
+
+    const fullClose = sellQty >= target.quantity * 0.999999;
+    const cash = await getPaperCash(params.userId);
+    const exitAt = new Date().toISOString();
+
+    if (fullClose) {
+      const proceeds = exitPrice * target.quantity;
+      const cashRemaining = cash + proceeds;
+      const closed: PaperPosition = {
+        ...target,
+        status: "closed",
+        exitPrice,
+        exitAt,
+      };
+      const next = positions.map((p) => (p.id === closed.id ? closed : p));
+      await savePaperPositions(params.userId, next);
+      await setPaperCash(params.userId, cashRemaining);
+      const mark = toMark(closed, exitPrice);
+      const remainingOpen = next.filter((p) => p.status === "open").length;
+      return {
+        ok: true,
+        closedCount: 1,
+        closedQty: target.quantity,
+        remainingQty: 0,
+        partial: false,
+        closed: [
+          {
+            id: mark.id,
+            symbol: mark.symbol,
+            quantity: mark.quantity,
+            exitPrice: mark.exitPrice ?? mark.markPrice,
+            unrealizedPnl: Number(mark.unrealizedPnl.toFixed(2)),
+            unrealizedPnlPct: Number(mark.unrealizedPnlPct.toFixed(2)),
+          },
+        ],
+        cashRemaining: Number(cashRemaining.toFixed(2)),
+        remainingOpen,
+      };
+    }
+
+    const proceeds = exitPrice * sellQty;
+    const cashRemaining = cash + proceeds;
+    const remainderQty = target.quantity - sellQty;
+
+    const closedSlice: PaperPosition = {
+      ...target,
+      id: createId(),
+      quantity: sellQty,
+      status: "closed",
+      exitPrice,
+      exitAt,
+      notes: target.notes
+        ? `${target.notes} · partial sell`
+        : "partial sell",
+    };
+    const remainder: PaperPosition = {
+      ...target,
+      quantity: remainderQty,
+    };
+
+    const next = positions
+      .filter((p) => p.id !== target.id)
+      .concat([remainder, closedSlice]);
+    await savePaperPositions(params.userId, next);
+    await setPaperCash(params.userId, cashRemaining);
+
+    const mark = toMark(closedSlice, exitPrice);
+    const remainingOpen = next.filter((p) => p.status === "open").length;
+
+    return {
+      ok: true,
+      closedCount: 1,
+      closedQty: sellQty,
+      remainingQty: remainderQty,
+      partial: true,
+      closed: [
+        {
+          id: mark.id,
+          symbol: mark.symbol,
+          quantity: mark.quantity,
+          exitPrice: mark.exitPrice ?? mark.markPrice,
+          unrealizedPnl: Number(mark.unrealizedPnl.toFixed(2)),
+          unrealizedPnlPct: Number(mark.unrealizedPnlPct.toFixed(2)),
+        },
+      ],
+      cashRemaining: Number(cashRemaining.toFixed(2)),
+      remainingOpen,
+    };
+  }).then(async (result) => {
+    const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
+    await syncTriggersWithPaperBook(params.userId);
+    return result;
+  });
+}
+
 export async function getPortfolioSummary(
   userId: string,
 ): Promise<PortfolioSummary> {

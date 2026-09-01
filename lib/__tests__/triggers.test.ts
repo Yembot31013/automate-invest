@@ -10,6 +10,7 @@ import {
   normalizeDeskTrigger,
   normalizeTriggerCondition,
   normalizeTriggerList,
+  normalizeTriggerSellClose,
   triggerConditionMet,
 } from "../triggers.ts";
 
@@ -130,6 +131,35 @@ describe("triggers", () => {
       false,
     );
     assert.match(formatTriggerSummary(t), /profit ≥ \$28/);
+  });
+
+  it("formats partial sell triggers", () => {
+    const partial = buildDeskTrigger({
+      symbol: "SOL/USD",
+      condition: { kind: "profit_usd_above", value: 28 },
+      action: "paper_sell",
+      sellCloseMode: "pct",
+      sellCloseValue: 50,
+    });
+    assert.match(formatTriggerSummary(partial), /Paper sell 50%/);
+
+    const usd = buildDeskTrigger({
+      symbol: "SOL/USD",
+      condition: { kind: "day_gain_pct", value: 8 },
+      action: "paper_sell",
+      sellCloseMode: "usd",
+      sellCloseValue: 500,
+    });
+    assert.match(formatTriggerSummary(usd), /Paper sell \$500/);
+
+    assert.deepEqual(
+      normalizeTriggerSellClose("paper_sell", "pct", 50),
+      { sellCloseMode: "pct", sellCloseValue: 50 },
+    );
+    assert.deepEqual(
+      normalizeTriggerSellClose("paper_buy", "pct", 50),
+      { sellCloseMode: "all", sellCloseValue: 0 },
+    );
   });
 });
 

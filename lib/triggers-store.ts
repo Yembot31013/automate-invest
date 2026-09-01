@@ -9,6 +9,7 @@ import {
 import {
   buildDeskTrigger,
   normalizeTriggerList,
+  normalizeTriggerSellClose,
   TriggerLimitError,
   type DeskTrigger,
   type TriggerAction,
@@ -51,6 +52,8 @@ export async function createUserTrigger(
     condition: TriggerCondition;
     action: TriggerAction;
     notionalUsd?: number;
+    sellCloseMode?: DeskTrigger["sellCloseMode"];
+    sellCloseValue?: number;
     autoPauseAfterFire?: boolean;
   },
 ): Promise<DeskTrigger> {
@@ -73,6 +76,8 @@ export type UserTriggerPatch = {
   condition?: TriggerCondition;
   action?: TriggerAction;
   notionalUsd?: number;
+  sellCloseMode?: DeskTrigger["sellCloseMode"];
+  sellCloseValue?: number;
   autoPauseAfterFire?: boolean;
 };
 
@@ -87,6 +92,11 @@ export async function updateUserTrigger(
     if (idx < 0) return null;
     const prev = current[idx]!;
     const action = patch.action ?? prev.action;
+    const sellClose = normalizeTriggerSellClose(
+      action,
+      patch.sellCloseMode ?? prev.sellCloseMode,
+      patch.sellCloseValue ?? prev.sellCloseValue,
+    );
     const updated: DeskTrigger = {
       ...prev,
       enabled: patch.enabled ?? prev.enabled,
@@ -94,6 +104,8 @@ export async function updateUserTrigger(
       action,
       notionalUsd:
         patch.notionalUsd !== undefined ? patch.notionalUsd : prev.notionalUsd,
+      sellCloseMode: sellClose.sellCloseMode,
+      sellCloseValue: sellClose.sellCloseValue,
       autoPauseAfterFire:
         patch.autoPauseAfterFire !== undefined
           ? patch.autoPauseAfterFire

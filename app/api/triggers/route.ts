@@ -23,6 +23,7 @@ import {
   normalizeNotionalUsd,
   normalizeTriggerAction,
   normalizeTriggerCondition,
+  normalizeTriggerSellClose,
   TRIGGER_CONDITION_HINT,
   TriggerLimitError,
 } from "@/lib/triggers";
@@ -94,6 +95,11 @@ export async function POST(request: Request) {
     );
 
     const notionalUsd = normalizeNotionalUsd(body.notionalUsd);
+    const sellClose = normalizeTriggerSellClose(
+      action,
+      body.sellCloseMode,
+      body.sellCloseValue,
+    );
     const [existing, book, settings] = await Promise.all([
       listUserTriggers(userId),
       loadTriggerBookContext(userId),
@@ -104,6 +110,8 @@ export async function POST(request: Request) {
       condition,
       action,
       notionalUsd,
+      sellCloseMode: sellClose.sellCloseMode,
+      sellCloseValue: sellClose.sellCloseValue,
       existing,
       book,
       guardrails: settings,
@@ -121,6 +129,8 @@ export async function POST(request: Request) {
       condition,
       action,
       notionalUsd,
+      sellCloseMode: sellClose.sellCloseMode,
+      sellCloseValue: sellClose.sellCloseValue,
       autoPauseAfterFire: normalizeAutoPauseAfterFire(
         body.autoPauseAfterFire,
         action,
@@ -208,6 +218,11 @@ export async function PATCH(request: Request) {
       body.autoPauseAfterFire !== undefined
         ? body.autoPauseAfterFire === true
         : current.autoPauseAfterFire;
+    const nextSellClose = normalizeTriggerSellClose(
+      nextAction!,
+      body.sellCloseMode ?? current.sellCloseMode,
+      body.sellCloseValue ?? current.sellCloseValue,
+    );
 
     const book = await loadTriggerBookContext(userId);
     const settings = await getDeskSettings(userId);
@@ -217,6 +232,8 @@ export async function PATCH(request: Request) {
       condition: nextCondition!,
       action: nextAction!,
       notionalUsd: nextNotional,
+      sellCloseMode: nextSellClose.sellCloseMode,
+      sellCloseValue: nextSellClose.sellCloseValue,
       enabled: nextEnabled,
       existing,
       book,
@@ -233,6 +250,8 @@ export async function PATCH(request: Request) {
       body.condition === undefined &&
       body.action === undefined &&
       body.notionalUsd === undefined &&
+      body.sellCloseMode === undefined &&
+      body.sellCloseValue === undefined &&
       body.autoPauseAfterFire === undefined &&
       typeof body.enabled === "boolean";
 
@@ -257,6 +276,14 @@ export async function PATCH(request: Request) {
       action: body.action !== undefined ? nextAction! : undefined,
       notionalUsd:
         body.notionalUsd !== undefined ? nextNotional : undefined,
+      sellCloseMode:
+        body.sellCloseMode !== undefined || body.sellCloseValue !== undefined
+          ? nextSellClose.sellCloseMode
+          : undefined,
+      sellCloseValue:
+        body.sellCloseMode !== undefined || body.sellCloseValue !== undefined
+          ? nextSellClose.sellCloseValue
+          : undefined,
       autoPauseAfterFire:
         body.autoPauseAfterFire !== undefined ? nextAutoPause : undefined,
     });

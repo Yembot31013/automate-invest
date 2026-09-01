@@ -47,6 +47,7 @@ import {
   normalizeAutoPauseAfterFire,
   normalizeNotionalUsd,
   normalizeTriggerCondition,
+  normalizeTriggerSellClose,
   TRIGGER_CONDITION_HINT,
   TriggerLimitError,
   type TriggerAction,
@@ -342,7 +343,7 @@ export function createDeskTools(userId: string) {
 
     createTrigger: tool({
       description:
-        "Create a user Trigger (same rules as Add → Trigger). Conditions: day_drop_pct / day_gain_pct / price_below / price_above / profit_usd_above / profit_pct_above (sell only — your lot's unrealized profit). Threshold MUST be positive (3 = −3% day for day_drop). Vague 'any negative' is NOT 0 — ask for a concrete %. paper_buy needs notionalUsd (25–5000) and enough paper cash; paper_sell can arm take-profit ahead (profit ≥ or day gain). Brackets (dip buy + take-profit sell) on one ticker are allowed. Rejects exact duplicates and day-drop buy+sell collision. Max " +
+        "Create a user Trigger (same rules as Add → Trigger). Conditions: day_drop_pct / day_gain_pct / price_below / price_above / profit_usd_above / profit_pct_above (sell only — your lot's unrealized profit). Threshold MUST be positive (3 = −3% day for day_drop). Vague 'any negative' is NOT 0 — ask for a concrete %. paper_buy needs notionalUsd (25–5000) and enough paper cash; paper_sell closes all lots OR a partial slice (sellCloseMode: all | pct | usd + sellCloseValue). Brackets (dip buy + take-profit sell) on one ticker are allowed. Rejects exact duplicates and day-drop buy+sell collision. Max " +
         String(MAX_USER_TRIGGERS) +
         ". Does NOT require Auto-trade.",
       inputSchema: z.object({
@@ -383,6 +384,19 @@ export function createDeskTools(userId: string) {
           .describe(
             "When true, rule pauses after it successfully fires. Default on for paper buy/sell, off for alert-only.",
           ),
+        sellCloseMode: z
+          .enum(["all", "pct", "usd"])
+          .optional()
+          .describe(
+            "paper_sell only: all = close every open lot; pct = sell % of newest lot; usd = sell ~$ value from newest lot.",
+          ),
+        sellCloseValue: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            "paper_sell partial size: percent 1–99 when sellCloseMode=pct, or USD when sellCloseMode=usd.",
+          ),
       }),
       execute: async ({
         symbol,
@@ -392,6 +406,8 @@ export function createDeskTools(userId: string) {
         action,
         notionalUsd,
         autoPauseAfterFire,
+        sellCloseMode,
+        sellCloseValue,
       }) => {
         const condition = normalizeTriggerCondition({
           kind: conditionKind,
@@ -407,6 +423,11 @@ export function createDeskTools(userId: string) {
         try {
           const verified = await verifyTradableSymbolDetailed(symbol, exchange);
           const size = normalizeNotionalUsd(notionalUsd);
+          const sellClose = normalizeTriggerSellClose(
+            action as TriggerAction,
+            sellCloseMode,
+            sellCloseValue,
+          );
           const [existing, book, settings] = await Promise.all([
             listUserTriggers(userId),
             loadTriggerBookContext(userId),
@@ -417,6 +438,8 @@ export function createDeskTools(userId: string) {
             condition,
             action: action as TriggerAction,
             notionalUsd: size,
+            sellCloseMode: sellClose.sellCloseMode,
+            sellCloseValue: sellClose.sellCloseValue,
             existing,
             book,
             guardrails: settings,
@@ -430,6 +453,8 @@ export function createDeskTools(userId: string) {
             condition,
             action: action as TriggerAction,
             notionalUsd: size,
+            sellCloseMode: sellClose.sellCloseMode,
+            sellCloseValue: sellClose.sellCloseValue,
             autoPauseAfterFire: normalizeAutoPauseAfterFire(
               autoPauseAfterFire,
               action as TriggerAction,
@@ -476,6 +501,8 @@ export function createDeskTools(userId: string) {
         value: z.number().optional(),
         action: z.enum(["attention", "paper_buy", "paper_sell"]).optional(),
         notionalUsd: z.number().positive().optional(),
+        sellCloseMode: z.enum(["all", "pct", "usd"]).optional(),
+        sellCloseValue: z.number().positive().optional(),
         autoPauseAfterFire: z.boolean().optional(),
         enabled: z.boolean().optional(),
       }),
@@ -518,6 +545,8 @@ export function createDeskTools(userId: string) {
           input.value !== undefined ||
           input.action !== undefined ||
           input.notionalUsd !== undefined ||
+          input.sellCloseMode !== undefined ||
+          input.sellCloseValue !== undefined ||
           input.autoPauseAfterFire !== undefined ||
           input.enabled !== undefined;
 
@@ -525,7 +554,7 @@ export function createDeskTools(userId: string) {
           return {
             ok: false,
             error:
-              "Nothing to change — pass condition, action, notionalUsd, autoPauseAfterFire, or enabled.",
+              "Nothing to change — pass condition, action, notionalUsd, sellCloseMode, autoPauseAfterFire, or enabled.",
           };
         }
 
@@ -544,6 +573,11 @@ export function createDeskTools(userId: string) {
         const nextNotional = normalizeNotionalUsd(
           input.notionalUsd ?? target.notionalUsd,
         );
+        const nextSellClose = normalizeTriggerSellClose(
+          nextAction,
+          input.sellCloseMode ?? target.sellCloseMode,
+          input.sellCloseValue ?? target.sellCloseValue,
+        );
         const nextEnabled = input.enabled ?? target.enabled;
         const nextAutoPause =
           input.autoPauseAfterFire !== undefined
@@ -560,6 +594,8 @@ export function createDeskTools(userId: string) {
           condition: nextCondition,
           action: nextAction,
           notionalUsd: nextNotional,
+          sellCloseMode: nextSellClose.sellCloseMode,
+          sellCloseValue: nextSellClose.sellCloseValue,
           enabled: nextEnabled,
           existing,
           book,
@@ -573,6 +609,8 @@ export function createDeskTools(userId: string) {
           condition: nextCondition,
           action: nextAction,
           notionalUsd: nextNotional,
+          sellCloseMode: nextSellClose.sellCloseMode,
+          sellCloseValue: nextSellClose.sellCloseValue,
           autoPauseAfterFire: nextAutoPause,
           enabled: nextEnabled,
         });

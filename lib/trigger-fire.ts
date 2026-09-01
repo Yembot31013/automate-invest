@@ -9,7 +9,7 @@ import {
 import { appendDeskEvent, tapeFromSnapshot } from "@/lib/desk-events";
 import { sendAttentionEmail } from "@/lib/email/attention";
 import { logger } from "@/lib/logger";
-import { getPortfolioSummary, paperBuy, paperSellMany } from "@/lib/paper";
+import { getPortfolioSummary, paperBuy, paperSellSymbol, type PaperSellClose } from "@/lib/paper";
 import {
   getSymbolTriggerUsers,
   incrementTriggerBuyStatsToday,
@@ -26,6 +26,7 @@ import {
 } from "@/lib/triggers-store";
 import {
   formatTriggerCondition,
+  formatTriggerSellClose,
   formatTriggerSummary,
   triggerConditionMet,
   type DeskTrigger,
@@ -76,6 +77,16 @@ function triggerFireOrder(a: DeskTrigger, b: DeskTrigger): number {
     return 2;
   };
   return rank(a) - rank(b);
+}
+
+function sellCloseFromTrigger(trigger: DeskTrigger): PaperSellClose {
+  if (trigger.sellCloseMode === "pct") {
+    return { mode: "pct", pct: trigger.sellCloseValue };
+  }
+  if (trigger.sellCloseMode === "usd") {
+    return { mode: "usd", usd: trigger.sellCloseValue };
+  }
+  return { mode: "all" };
 }
 
 async function maybeAutoPauseTriggerAfterFire(
@@ -276,14 +287,40 @@ async function fireTriggerAction(params: {
       });
       return;
     }
-    const sold = await paperSellMany({
+    const sold = await paperSellSymbol({
       userId,
-      symbols: [trigger.symbol],
+      symbol: trigger.symbol,
+      close: sellCloseFromTrigger(trigger),
     });
+    if (sold.closedCount === 0) {
+      const chip = triggerSkipCopy({
+        symbol: trigger.symbol,
+        message: sold.message ?? "no open lot",
+      });
+      await appendDeskEvent(userId, {
+        kind: "trigger-skip",
+        text: chip.text,
+        hint: chip.hint,
+        symbol: trigger.symbol,
+        tape: triggerTape,
+      });
+      await notifyTriggerAttention({
+        userId,
+        trigger,
+        snapshot,
+        extra: "Rule wanted a sell, but you don't hold that name.",
+      });
+      return;
+    }
     const sellChip = triggerSellCopy({
       symbol: trigger.symbol,
       closedCount: sold.closedCount,
       condition: formatTriggerCondition(trigger.condition),
+      partial: sold.partial,
+      closeLabel:
+        trigger.sellCloseMode !== "all"
+          ? formatTriggerSellClose(trigger)
+          : undefined,
     });
     await appendDeskEvent(userId, {
       kind: "trigger-sell",
@@ -292,11 +329,14 @@ async function fireTriggerAction(params: {
       symbol: trigger.symbol,
       tape: triggerTape,
     });
+    const sellDetail = sold.partial
+      ? `Partial paper sell · ${formatTriggerSellClose(trigger)} · cash ~$${sold.cashRemaining.toFixed(0)}`
+      : `Paper sold ${sold.closedCount} lot(s) · cash ~$${sold.cashRemaining.toFixed(0)}`;
     await notifyTriggerAttention({
       userId,
       trigger,
       snapshot,
-      extra: `Paper sold ${sold.closedCount} lot(s) · cash ~$${sold.cashRemaining.toFixed(0)}`,
+      extra: sellDetail,
     });
     await maybeAutoPauseTriggerAfterFire(userId, trigger);
   } catch (err) {

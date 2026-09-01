@@ -120,10 +120,26 @@ export function triggerSellCopy(params: {
   symbol: string;
   closedCount: number;
   condition: string;
+  partial?: boolean;
+  closeLabel?: string;
 }): DeskEventCopy {
+  let text: string;
+  if (params.partial && params.closeLabel) {
+    text = `Trigger sold ${params.closeLabel} of ${params.symbol}`;
+  } else if (params.partial) {
+    text = `Trigger partially sold ${params.symbol}`;
+  } else {
+    text = `Trigger closed ${params.closedCount} ${params.symbol} lot${params.closedCount === 1 ? "" : "s"}`;
+  }
+  const hintDetail =
+    params.partial && params.closeLabel
+      ? `${params.closeLabel} partial`
+      : params.partial
+        ? "partial"
+        : "all lots";
   return {
-    text: `Trigger closed ${params.closedCount} ${params.symbol} lot${params.closedCount === 1 ? "" : "s"}`,
-    hint: `User trigger fired · ${params.condition} · paper sell filled`,
+    text,
+    hint: `User trigger fired · ${params.condition} · paper sell filled (${hintDetail})`,
   };
 }
 

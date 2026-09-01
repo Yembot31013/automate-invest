@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/Feedback";
 import { formatChatTime } from "@/lib/chat-time";
 import {
   formatTriggerAction,
+  formatTriggerActionDetail,
   formatTriggerCondition,
   formatTriggerNotional,
   isProfitTriggerCondition,
@@ -138,6 +139,13 @@ export function DeskTriggerDetailModal({
                 <span className="desk-trigger-size">
                   {formatTriggerNotional(trigger.notionalUsd)}
                 </span>
+              ) : trigger.action === "paper_sell" &&
+                trigger.sellCloseMode !== "all" ? (
+                <span className="desk-trigger-size">
+                  {formatTriggerActionDetail(trigger).replace(/^Paper sell /, "")}
+                </span>
+              ) : trigger.action === "paper_sell" ? (
+                <span className="desk-trigger-size">All</span>
               ) : null}
             </dd>
           </div>

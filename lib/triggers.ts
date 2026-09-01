@@ -17,6 +17,9 @@ export type TriggerCondition = {
 
 export type TriggerAction = "attention" | "paper_buy" | "paper_sell";
 
+/** How much of the symbol to close when a paper_sell trigger fires. */
+export type TriggerSellCloseMode = "all" | "pct" | "usd";
+
 export type DeskTrigger = {
   id: string;
   symbol: string;
@@ -26,6 +29,10 @@ export type DeskTrigger = {
   enabled: boolean;
   /** Paper-buy notional in USD when action is paper_buy. */
   notionalUsd: number;
+  /** paper_sell: close entire symbol (all lots) or partial on the newest lot. */
+  sellCloseMode: TriggerSellCloseMode;
+  /** paper_sell partial: percent (1–99) or USD notional when mode is pct/usd. */
+  sellCloseValue: number;
   /** When true, rule auto-pauses after a successful fire (trade or alert). */
   autoPauseAfterFire: boolean;
   createdAt: string;
@@ -35,6 +42,9 @@ export type DeskTrigger = {
 
 export const DEFAULT_TRIGGER_NOTIONAL_USD = 1_000;
 export const MAX_TRIGGER_NOTIONAL_USD = 5_000;
+export const MAX_TRIGGER_SELL_CLOSE_USD = 50_000;
+
+const SELL_CLOSE_MODES = new Set<TriggerSellCloseMode>(["all", "pct", "usd"]);
 
 export class TriggerLimitError extends Error {
   readonly limit: number;
@@ -150,6 +160,49 @@ export function normalizeNotionalUsd(raw: unknown): number {
   return Math.min(MAX_TRIGGER_NOTIONAL_USD, Math.max(25, Math.round(n)));
 }
 
+export function defaultSellCloseMode(action: TriggerAction): TriggerSellCloseMode {
+  return action === "paper_sell" ? "all" : "all";
+}
+
+export function normalizeSellCloseMode(
+  raw: unknown,
+  action: TriggerAction,
+): TriggerSellCloseMode {
+  if (action !== "paper_sell") return "all";
+  if (typeof raw === "string" && SELL_CLOSE_MODES.has(raw as TriggerSellCloseMode)) {
+    return raw as TriggerSellCloseMode;
+  }
+  return "all";
+}
+
+export function normalizeSellCloseValue(
+  raw: unknown,
+  mode: TriggerSellCloseMode,
+): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return mode === "pct" ? 50 : 500;
+  if (mode === "pct") {
+    return Math.min(99, Math.max(1, Math.round(n)));
+  }
+  if (mode === "usd") {
+    return Math.min(MAX_TRIGGER_SELL_CLOSE_USD, Math.max(1, Math.round(n)));
+  }
+  return 0;
+}
+
+export function normalizeTriggerSellClose(
+  action: TriggerAction,
+  modeRaw: unknown,
+  valueRaw: unknown,
+): { sellCloseMode: TriggerSellCloseMode; sellCloseValue: number } {
+  const sellCloseMode = normalizeSellCloseMode(modeRaw, action);
+  const sellCloseValue =
+    sellCloseMode === "all"
+      ? 0
+      : normalizeSellCloseValue(valueRaw, sellCloseMode);
+  return { sellCloseMode, sellCloseValue };
+}
+
 export function normalizeDeskTrigger(raw: unknown): DeskTrigger | null {
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
@@ -178,6 +231,11 @@ export function normalizeDeskTrigger(raw: unknown): DeskTrigger | null {
       : createdAt;
   const lastFiredAt =
     typeof rec.lastFiredAt === "string" ? rec.lastFiredAt : null;
+  const sellClose = normalizeTriggerSellClose(
+    action,
+    rec.sellCloseMode,
+    rec.sellCloseValue,
+  );
 
   return {
     id,
@@ -187,6 +245,8 @@ export function normalizeDeskTrigger(raw: unknown): DeskTrigger | null {
     action,
     enabled: rec.enabled !== false,
     notionalUsd: normalizeNotionalUsd(rec.notionalUsd),
+    sellCloseMode: sellClose.sellCloseMode,
+    sellCloseValue: sellClose.sellCloseValue,
     autoPauseAfterFire: normalizeAutoPauseAfterFire(rec.autoPauseAfterFire, action),
     createdAt,
     updatedAt,
@@ -213,11 +273,18 @@ export function buildDeskTrigger(input: {
   condition: TriggerCondition;
   action: TriggerAction;
   notionalUsd?: number;
+  sellCloseMode?: TriggerSellCloseMode;
+  sellCloseValue?: number;
   enabled?: boolean;
   autoPauseAfterFire?: boolean;
 }): DeskTrigger {
   const now = new Date().toISOString();
   const action = input.action;
+  const sellClose = normalizeTriggerSellClose(
+    action,
+    input.sellCloseMode,
+    input.sellCloseValue,
+  );
   return {
     id: newTriggerId(),
     symbol: input.symbol.trim().toUpperCase(),
@@ -226,6 +293,8 @@ export function buildDeskTrigger(input: {
     action,
     enabled: input.enabled !== false,
     notionalUsd: normalizeNotionalUsd(input.notionalUsd),
+    sellCloseMode: sellClose.sellCloseMode,
+    sellCloseValue: sellClose.sellCloseValue,
     autoPauseAfterFire:
       input.autoPauseAfterFire ?? defaultAutoPauseAfterFire(action),
     createdAt: now,
@@ -326,9 +395,28 @@ export function formatTriggerNotional(usd: number): string {
   return formatNotionalShort(usd);
 }
 
+export function formatTriggerSellClose(trigger: DeskTrigger): string {
+  if (trigger.action !== "paper_sell" || trigger.sellCloseMode === "all") {
+    return "all";
+  }
+  if (trigger.sellCloseMode === "pct") {
+    return `${trigger.sellCloseValue}%`;
+  }
+  return formatNotionalShort(trigger.sellCloseValue);
+}
+
 export function formatTriggerActionDetail(trigger: DeskTrigger): string {
   if (trigger.action === "paper_buy") {
     return `Paper buy ${formatNotionalShort(trigger.notionalUsd)}`;
+  }
+  if (trigger.action === "paper_sell") {
+    if (trigger.sellCloseMode === "all") {
+      return "Paper sell all";
+    }
+    if (trigger.sellCloseMode === "pct") {
+      return `Paper sell ${trigger.sellCloseValue}%`;
+    }
+    return `Paper sell ${formatNotionalShort(trigger.sellCloseValue)}`;
   }
   return formatTriggerAction(trigger.action);
 }

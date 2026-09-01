@@ -58,17 +58,21 @@ export function bookOwnsSymbol(
   return book.openSymbols.some((s) => triggerSymbolsMatch(s, symbol));
 }
 
-/** Exact rule already armed (same symbol + condition + action). */
+/** Exact rule already armed (same symbol + condition + action + sell size). */
 export function findDuplicateTrigger(
   existing: ReadonlyArray<DeskTrigger>,
   candidate: {
     symbol: string;
     condition: TriggerCondition;
     action: TriggerAction;
+    sellCloseMode?: DeskTrigger["sellCloseMode"];
+    sellCloseValue?: number;
   },
   excludeId?: string,
 ): DeskTrigger | null {
   const symbol = candidate.symbol.trim().toUpperCase();
+  const sellMode = candidate.sellCloseMode ?? "all";
+  const sellValue = candidate.sellCloseValue ?? 0;
   return (
     existing.find(
       (t) =>
@@ -76,7 +80,10 @@ export function findDuplicateTrigger(
         triggerSymbolsMatch(t.symbol, symbol) &&
         t.action === candidate.action &&
         t.condition.kind === candidate.condition.kind &&
-        t.condition.value === candidate.condition.value,
+        t.condition.value === candidate.condition.value &&
+        (candidate.action !== "paper_sell" ||
+          (t.sellCloseMode === sellMode &&
+            t.sellCloseValue === sellValue)),
     ) ?? null
   );
 }
@@ -154,6 +161,8 @@ function runCreateChecks(params: {
   condition: TriggerCondition;
   action: TriggerAction;
   notionalUsd: number;
+  sellCloseMode?: DeskTrigger["sellCloseMode"];
+  sellCloseValue?: number;
   enabled?: boolean;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
@@ -214,6 +223,8 @@ export function validateTriggerCreate(params: {
   condition: TriggerCondition;
   action: TriggerAction;
   notionalUsd: number;
+  sellCloseMode?: DeskTrigger["sellCloseMode"];
+  sellCloseValue?: number;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
   guardrails?: TriggerGuardrailSettings;
@@ -234,6 +245,8 @@ export function validateTriggerEnable(params: {
     condition: trigger.condition,
     action: trigger.action,
     notionalUsd: trigger.notionalUsd,
+    sellCloseMode: trigger.sellCloseMode,
+    sellCloseValue: trigger.sellCloseValue,
     enabled: true,
     existing,
     book,
@@ -249,6 +262,8 @@ export function validateTriggerUpdate(params: {
   condition: TriggerCondition;
   action: TriggerAction;
   notionalUsd: number;
+  sellCloseMode?: DeskTrigger["sellCloseMode"];
+  sellCloseValue?: number;
   enabled: boolean;
   existing: ReadonlyArray<DeskTrigger>;
   book: TriggerBookContext;
@@ -264,6 +279,8 @@ export function validateTriggerUpdate(params: {
     condition: params.condition,
     action: params.action,
     notionalUsd: params.notionalUsd,
+    sellCloseMode: params.sellCloseMode,
+    sellCloseValue: params.sellCloseValue,
     enabled: true,
     existing: params.existing,
     book: params.book,

@@ -35,6 +35,7 @@ import {
   type DeskTrigger,
   type TriggerAction,
   type TriggerConditionKind,
+  type TriggerSellCloseMode,
 } from "@/lib/triggers";
 
 type DeskSnapshot = {
@@ -551,6 +552,8 @@ export function DeskShell() {
     value: number;
     action: TriggerAction;
     notionalUsd?: number;
+    sellCloseMode?: TriggerSellCloseMode;
+    sellCloseValue?: number;
     autoPauseAfterFire?: boolean;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     const symbol = input.symbol.trim().toUpperCase();
@@ -568,6 +571,8 @@ export function DeskShell() {
           condition: { kind: input.conditionKind, value: input.value },
           action: input.action,
           notionalUsd: input.notionalUsd,
+          sellCloseMode: input.sellCloseMode,
+          sellCloseValue: input.sellCloseValue,
           autoPauseAfterFire: input.autoPauseAfterFire,
         }),
       });
@@ -868,6 +873,15 @@ export function DeskShell() {
                     {trg.action === "paper_buy" ? (
                       <span className="desk-trigger-size">
                         {formatTriggerNotional(trg.notionalUsd)}
+                      </span>
+                    ) : trg.action === "paper_sell" ? (
+                      <span className="desk-trigger-size">
+                        {trg.sellCloseMode === "all"
+                          ? "All"
+                          : formatTriggerActionDetail(trg).replace(
+                              /^Paper sell /,
+                              "",
+                            )}
                       </span>
                     ) : null}
                   </div>
