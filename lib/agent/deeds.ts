@@ -161,6 +161,16 @@ const DEED_COPY: Record<string, DeedCopy> = {
     done: "Tape + headlines checked",
     error: "Couldn't read the tape",
   },
+  getSnapshots: {
+    running: "Checking several tapes…",
+    done: "Batch tape checked",
+    error: "Couldn't read those tapes",
+  },
+  getWatchlistTape: {
+    running: "Scanning your whole board…",
+    done: "Watchlist tape checked",
+    error: "Couldn't read the watchlist tape",
+  },
   listWatchlist: {
     running: "Looking at your board…",
     done: "Board checked",
@@ -277,6 +287,28 @@ function deedHint(params: {
         return err ? `Couldn't read tape for ${sym}: ${err}` : `Couldn't read tape for ${sym}`;
       }
       return `Checked tape + headlines for ${sym}`;
+    }
+    case "getSnapshots": {
+      const label = compactSymbolLabel(symbols) || "batch";
+      if (phase === "running") {
+        return `Checking tape for ${label}${symbols.length > 1 ? ` (${symbols.length} names)` : ""}`;
+      }
+      if (phase === "error") {
+        return err ? `Batch tape failed: ${err}` : "Batch tape failed";
+      }
+      const count =
+        typeof outRec?.count === "number" ? outRec.count : symbols.length;
+      return `Checked tape for ${count} symbol${count === 1 ? "" : "s"}`;
+    }
+    case "getWatchlistTape": {
+      if (phase === "running") return "Scanning live tape for your whole watchlist";
+      if (phase === "error") {
+        return err ? `Watchlist tape failed: ${err}` : "Watchlist tape failed";
+      }
+      const count = typeof outRec?.count === "number" ? outRec.count : null;
+      return count == null
+        ? "Scanned your watchlist tape"
+        : `Scanned ${count} watchlist ticker${count === 1 ? "" : "s"}`;
     }
     case "listWatchlist": {
       if (phase === "running") return "Reading your watchlist";

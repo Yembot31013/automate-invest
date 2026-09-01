@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { requiresDeskVerificationFirst } from "../agent/desk-verify-intent.ts";
+import { isCasualDeskChat, requiresDeskVerificationFirst } from "../agent/desk-verify-intent.ts";
 
 describe("requiresDeskVerificationFirst", () => {
   it("matches accuracy challenges", () => {
@@ -12,8 +12,12 @@ describe("requiresDeskVerificationFirst", () => {
     assert.equal(requiresDeskVerificationFirst("are you sure about that"), true);
   });
 
-  it("matches short reactive pushback", () => {
-    assert.equal(requiresDeskVerificationFirst("what do you mean?"), true);
+  it("ignores casual vibe checks", () => {
+    assert.equal(
+      requiresDeskVerificationFirst("what is on your mind today buddy?"),
+      false,
+    );
+    assert.equal(isCasualDeskChat("hey buddy salute"), true);
   });
 
   it("matches open desk-log thread follow-ups", () => {

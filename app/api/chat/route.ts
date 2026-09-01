@@ -114,17 +114,19 @@ export async function POST(request: Request) {
       }),
       messages: await convertToModelMessages(modelMessages),
       tools,
-      stopWhen: isStepCount(8),
+      stopWhen: isStepCount(10),
       prepareStep: ({ stepNumber, steps }) => {
-        if (forceDeskVerifyFirst && stepNumber === 0) {
+        if (forceDeskVerifyFirst) {
           const verified = steps.some((step) =>
             step.toolCalls.some((call) => call.toolName === "portfolioPnL"),
           );
-          if (!verified) {
+          if (!verified && stepNumber === 0) {
             return {
-              toolChoice: "required",
-              activeTools: ["portfolioPnL"],
+              toolChoice: { type: "tool", toolName: "portfolioPnL" },
             };
+          }
+          if (verified && stepNumber >= 1 && stepNumber <= 2) {
+            return { toolChoice: "none" };
           }
         }
 

@@ -96,6 +96,21 @@ function isToolDone(state: string): boolean {
   );
 }
 
+/** Hide duplicate parallel tool calls (same tool + input) in one assistant turn. */
+function dedupeToolParts<T extends { type: string; input?: unknown }>(
+  parts: T[],
+): T[] {
+  const seen = new Set<string>();
+  return parts.filter((part) => {
+    if (!part.type.startsWith("tool-")) return true;
+    const toolName = part.type.replace(/^tool-/, "");
+    const key = `${toolName}:${JSON.stringify(part.input ?? {})}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function toolMutationSummary(toolName: string): string {
   switch (toolName) {
     case "monitorSymbol":
@@ -619,7 +634,7 @@ function DeskChatSession({
                 </time>
               ) : null}
             </div>
-            {message.parts.map((part, partIndex) => {
+            {dedupeToolParts(message.parts).map((part, partIndex) => {
               if (part.type === "text") {
                 return (
                   <MarkdownBubble

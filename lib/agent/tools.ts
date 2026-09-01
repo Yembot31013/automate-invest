@@ -49,6 +49,8 @@ import {
   type TriggerAction,
 } from "@/lib/triggers";
 import { loadTriggerBookContext } from "@/lib/trigger-sync";
+import { createToolDedupeCache } from "@/lib/agent/tool-dedupe";
+import { mapPool } from "@/lib/concurrency";
 import {
   validateTriggerCreate,
   validateTriggerEnable,
@@ -77,10 +79,12 @@ function slimSnapshot(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
 }
 
 export function createDeskTools(userId: string) {
+  const dedupe = createToolDedupeCache();
+
   return {
     getSnapshot: tool({
       description:
-        "Fetch a live market snapshot for a symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). Supports US/NGX equities, allowlisted crypto, major FX pairs (EUR/USD, GBP/USD, …), and commodities (XAU/USD gold, XAG/USD silver, WTI/USD oil). After calling, explain headlines in plain English — do not only list titles. For NGX naira→dollar value questions, also call lookupForex.",
+        "Fetch a live market snapshot for ONE symbol (price, SMA, volume ratio, sentiment, recent headlines with short summaries). For several tickers at once, use getSnapshots or getWatchlistTape instead — do NOT fire parallel getSnapshot calls.",
       inputSchema: z.object({
         symbol: z
           .string()
@@ -94,12 +98,91 @@ export function createDeskTools(userId: string) {
       }),
       execute: async ({ symbol, exchange }) => {
         const resolved = resolveSymbolInput(symbol, exchange);
-        const snapshot = await loadSnapshot(
-          resolved.symbol,
-          exchange ?? resolved.exchange,
-        );
-        return slimSnapshot(snapshot);
+        const key = `getSnapshot:${resolved.symbol}:${exchange ?? resolved.exchange}`;
+        return dedupe(key, async () => {
+          const snapshot = await loadSnapshot(
+            resolved.symbol,
+            exchange ?? resolved.exchange,
+          );
+          return slimSnapshot(snapshot);
+        });
       },
+    }),
+
+    getSnapshots: tool({
+      description:
+        "Fetch live snapshots for multiple symbols in ONE call (max 12). Use when you need tape/headlines on several names — never parallel getSnapshot.",
+      inputSchema: z.object({
+        symbols: z
+          .array(z.string())
+          .min(1)
+          .max(12)
+          .describe("Tickers or pairs to snapshot together"),
+      }),
+      execute: async ({ symbols }) => {
+        const key = `getSnapshots:${symbols.map((s) => s.trim().toUpperCase()).sort().join(",")}`;
+        return dedupe(key, async () => {
+          const snapshots = await mapPool(symbols, 4, async (raw) => {
+            try {
+              const resolved = resolveSymbolInput(raw);
+              const snapshot = await loadSnapshot(
+                resolved.symbol,
+                resolved.exchange,
+              );
+              return { ok: true as const, ...slimSnapshot(snapshot) };
+            } catch (error) {
+              return {
+                ok: false as const,
+                symbol: raw.trim().toUpperCase(),
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Snapshot failed for that symbol",
+              };
+            }
+          });
+          return {
+            count: snapshots.filter((row) => row.ok).length,
+            snapshots,
+          };
+        });
+      },
+    }),
+
+    getWatchlistTape: tool({
+      description:
+        "One call: live price, day %, and headlines for every symbol on the user's watchlist. Use for board overview or casual 'what's on your mind' — not parallel getSnapshot per ticker.",
+      inputSchema: z.object({}),
+      execute: async () =>
+        dedupe("getWatchlistTape", async () => {
+          const watchlist = await getUserWatchlist(userId);
+          if (watchlist.length === 0) {
+            return {
+              count: 0,
+              snapshots: [],
+              message: "Watchlist is empty — nothing to tape yet.",
+            };
+          }
+          const snapshots = await mapPool(watchlist, 4, async (entry) => {
+            try {
+              const snapshot = await loadSnapshot(entry.symbol, entry.exchange);
+              return { ok: true as const, ...slimSnapshot(snapshot) };
+            } catch (error) {
+              return {
+                ok: false as const,
+                symbol: entry.symbol,
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Snapshot failed for that symbol",
+              };
+            }
+          });
+          return {
+            count: snapshots.filter((row) => row.ok).length,
+            snapshots,
+          };
+        }),
     }),
 
     lookupForex: tool({
@@ -737,31 +820,32 @@ export function createDeskTools(userId: string) {
 
     portfolioPnL: tool({
       description:
-        "Mark-to-market summary of open paper positions plus remaining cash and equity.",
+        "Mark-to-market summary of open paper positions plus remaining cash and equity. Call at most ONCE per user message — never parallel duplicate calls.",
       inputSchema: z.object({}),
-      execute: async () => {
-        const summary = await getPortfolioSummary(userId);
-        return {
-          openCount: summary.openCount,
-          cash: Number(summary.cash.toFixed(2)),
-          equity: Number(summary.equity.toFixed(2)),
-          totalCost: Number(summary.totalCost.toFixed(2)),
-          totalMarketValue: Number(summary.totalMarketValue.toFixed(2)),
-          totalUnrealizedPnl: Number(summary.totalUnrealizedPnl.toFixed(2)),
-          totalUnrealizedPnlPct: Number(
-            summary.totalUnrealizedPnlPct.toFixed(2),
-          ),
-          positions: summary.positions.map((p) => ({
-            id: p.id,
-            symbol: p.symbol,
-            quantity: p.quantity,
-            entryPrice: p.entryPrice,
-            markPrice: p.markPrice,
-            unrealizedPnl: Number(p.unrealizedPnl.toFixed(2)),
-            unrealizedPnlPct: Number(p.unrealizedPnlPct.toFixed(2)),
-          })),
-        };
-      },
+      execute: async () =>
+        dedupe("portfolioPnL", async () => {
+          const summary = await getPortfolioSummary(userId);
+          return {
+            openCount: summary.openCount,
+            cash: Number(summary.cash.toFixed(2)),
+            equity: Number(summary.equity.toFixed(2)),
+            totalCost: Number(summary.totalCost.toFixed(2)),
+            totalMarketValue: Number(summary.totalMarketValue.toFixed(2)),
+            totalUnrealizedPnl: Number(summary.totalUnrealizedPnl.toFixed(2)),
+            totalUnrealizedPnlPct: Number(
+              summary.totalUnrealizedPnlPct.toFixed(2),
+            ),
+            positions: summary.positions.map((p) => ({
+              id: p.id,
+              symbol: p.symbol,
+              quantity: p.quantity,
+              entryPrice: p.entryPrice,
+              markPrice: p.markPrice,
+              unrealizedPnl: Number(p.unrealizedPnl.toFixed(2)),
+              unrealizedPnlPct: Number(p.unrealizedPnlPct.toFixed(2)),
+            })),
+          };
+        }),
     }),
 
     whatIf: tool({
