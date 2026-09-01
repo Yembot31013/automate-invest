@@ -116,17 +116,14 @@ export async function POST(request: Request) {
       tools,
       stopWhen: isStepCount(10),
       prepareStep: ({ stepNumber, steps }) => {
-        if (forceDeskVerifyFirst) {
+        if (forceDeskVerifyFirst && stepNumber === 0) {
           const verified = steps.some((step) =>
             step.toolCalls.some((call) => call.toolName === "portfolioPnL"),
           );
-          if (!verified && stepNumber === 0) {
+          if (!verified) {
             return {
               toolChoice: { type: "tool", toolName: "portfolioPnL" },
             };
-          }
-          if (verified && stepNumber >= 1 && stepNumber <= 2) {
-            return { toolChoice: "none" };
           }
         }
 

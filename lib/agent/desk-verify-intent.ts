@@ -1,4 +1,4 @@
-/** Greetings / vibe checks — no forced verification or tool spam. */
+/** Greetings / vibe checks — skip forced pushback portfolioPnL, not voluntary tools. */
 const CASUAL_DESK_CHAT =
   /\b(what(?:'s| is) on your mind|how are you|how(?:'s| is) it going|what(?:'s| is) up|good morning|good evening|hey buddy|hey bro|salute|what do you think today|anything interesting today|what are you thinking|what'?s the vibe)\b/i;
 
