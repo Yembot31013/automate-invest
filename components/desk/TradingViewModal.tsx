@@ -82,11 +82,15 @@ export function tradingViewSymbolPageUrl(tvSymbol: string): string {
   return `https://www.tradingview.com/symbols/${encodeURIComponent(path)}/`;
 }
 
-function tradingViewEmbedUrl(tvSymbol: string, theme: "light" | "dark"): string {
+function tradingViewEmbedUrl(
+  tvSymbol: string,
+  theme: "light" | "dark",
+  interval = "D",
+): string {
   const params = new URLSearchParams({
     frameElementId: "sd-tv",
     symbol: tvSymbol,
-    interval: "D",
+    interval,
     hidesidetoolbar: "0",
     hidetoptoolbar: "0",
     symboledit: "1",
@@ -104,6 +108,8 @@ function tradingViewEmbedUrl(tvSymbol: string, theme: "light" | "dark"): string 
   });
   return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
 }
+
+export { tradingViewEmbedUrl };
 
 function DeskLineChart({
   values,

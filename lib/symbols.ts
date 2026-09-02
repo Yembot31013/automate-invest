@@ -64,6 +64,8 @@ const FX_PAIR_ALIASES: Record<string, string> = {
   NZDUSD: "NZD/USD",
   NZD: "NZD/USD",
   EURGBP: "EUR/GBP",
+  EURAUD: "EUR/AUD",
+  GBPCAD: "GBP/CAD",
 };
 
 const COMMODITY_ALIASES: Record<string, string> = {
@@ -535,6 +537,8 @@ const FX_NEWS_ALIASES: Record<string, string[]> = {
   "USD/CAD": ["usd/cad", "usdcad", "loonie", "boc"],
   "NZD/USD": ["nzd/usd", "nzdusd", "kiwi", "rbnz"],
   "EUR/GBP": ["eur/gbp", "eurgbp"],
+  "EUR/AUD": ["eur/aud", "euraud", "euro aussie"],
+  "GBP/CAD": ["gbp/cad", "gbpcad", "cable loonie"],
   "XAU/USD": ["gold", "xau", "xauusd", "bullion", "precious metal"],
   "XAG/USD": ["silver", "xag", "xagusd"],
   "WTI/USD": ["wti", "crude", "oil", "opec", "brent", "petroleum"],

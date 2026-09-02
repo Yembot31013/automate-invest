@@ -20,13 +20,14 @@ import {
   isSharpDip,
   MarketDataError,
 } from "@/lib/market";
-import { isCryptoPair, isNgxExchange } from "@/lib/symbols";
+import { isCryptoPair, isForexPair, isNgxExchange } from "@/lib/symbols";
 import {
   getSymbolWatchers,
   getTriggerCoverage,
   markAlertSent,
   wasAlertedRecently,
 } from "@/lib/redis";
+import { evaluateStructureForSymbol } from "@/lib/structure-scanner";
 import { runTriggersAgainstSnapshot } from "@/lib/trigger-fire";
 import { listUserTriggers } from "@/lib/triggers-store";
 import { mergeScanUniverse } from "@/lib/triggers";
@@ -103,7 +104,18 @@ async function evaluateSymbol(
     notify: options.notify,
   });
 
-  return { alerts, skipped, triggers };
+  const structureSkipped: string[] = [];
+  if (isForexPair(symbol) && options.notify) {
+    const structure = await evaluateStructureForSymbol(symbol, options);
+    if (structure.skipped) {
+      structureSkipped.push(structure.skipped);
+    }
+    if (structure.alerted) {
+      triggers.push(`structure:${symbol}:entry`);
+    }
+  }
+
+  return { alerts, skipped: [...skipped, ...structureSkipped], triggers };
 }
 
 async function notifyUserAttention(params: {

@@ -423,6 +423,79 @@ export async function fetchYahooDailyOhlc(
   return series;
 }
 
+const INTRADAY_CACHE_TTL = 900;
+
+/** FX intraday bars via Yahoo (60m), resampled upstream to 2H for structure scans. */
+export async function fetchYahooIntradayOhlc(
+  deskSymbol: string,
+  assetClass: "forex" | "commodity",
+  interval: "60m" | "30m" = "60m",
+  range: "30d" | "60d" = "60d",
+): Promise<CandleSeries> {
+  const yahooSymbol = yahooChartSymbol(deskSymbol, assetClass);
+  const cacheKey = `cache:ohlc:intraday:${deskSymbol}:${interval}:${range}`;
+  const cached = await cacheGet<CandleSeries>(cacheKey);
+  if (cached?.bars?.length) {
+    return cached;
+  }
+
+  const url = new URL(
+    `${YAHOO_CHART_BASE}/${encodeURIComponent(yahooSymbol)}`,
+  );
+  url.searchParams.set("interval", interval);
+  url.searchParams.set("range", range);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "SignalDesk/1.0",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new MarketDataError(
+      `Yahoo intraday chart failed for ${deskSymbol}: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload = (await response.json()) as YahooChartResponse;
+  const result = payload.chart?.result?.[0];
+  if (payload.chart?.error || !result?.timestamp?.length) {
+    throw new MarketDataError(
+      `No Yahoo intraday data for ${deskSymbol} (${yahooSymbol})`,
+    );
+  }
+
+  const quote = result.indicators?.quote?.[0];
+  const bars: OhlcBar[] = [];
+  for (let i = 0; i < result.timestamp.length; i += 1) {
+    const close = quote?.close?.[i];
+    if (close == null || !Number.isFinite(close)) continue;
+    const open = quote?.open?.[i] ?? close;
+    const high = quote?.high?.[i] ?? close;
+    const low = quote?.low?.[i] ?? close;
+    const volume = quote?.volume?.[i] ?? 0;
+    bars.push({
+      timestamp: result.timestamp[i] ?? 0,
+      open,
+      high,
+      low,
+      close,
+      volume: volume ?? 0,
+    });
+  }
+
+  if (bars.length === 0) {
+    throw new MarketDataError(`Empty Yahoo intraday OHLC for ${deskSymbol}`);
+  }
+
+  const series = { symbol: deskSymbol.toUpperCase(), bars };
+  await cacheSet(cacheKey, series, INTRADAY_CACHE_TTL);
+  return series;
+}
+
 function hasAlpacaCredentials(): boolean {
   return Boolean(
     process.env.ALPACA_API_KEY?.trim() &&

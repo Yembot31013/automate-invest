@@ -13,6 +13,10 @@ import {
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Tip } from "@/components/ui/Tip";
 import { MarkdownBubble } from "@/components/desk/MarkdownBubble";
+import {
+  StructureSetupBlock,
+  structureChartFromToolOutput,
+} from "@/components/desk/StructureSetupBlock";
 import { withUniqueMessageIds } from "@/lib/agent/messages";
 import { deskDeedForTool } from "@/lib/agent/deeds";
 import {
@@ -660,31 +664,42 @@ function DeskChatSession({
                     : deed.phase === "done"
                       ? "desk-deed-done"
                       : "desk-deed-running";
+                const structurePayload =
+                  toolName === "getStructureSetup" && deed.phase === "done"
+                    ? structureChartFromToolOutput(output)
+                    : null;
                 return (
-                  <Tip
-                    key={partIndex}
-                    label={deed.hint}
-                    as="div"
-                    className="mt-1 w-full"
-                    side="top"
-                  >
-                    <div
-                      className={`desk-deed ${toneClass}`}
-                      role="status"
-                      aria-label={deed.hint}
+                  <div key={partIndex} className="mt-1 w-full space-y-2">
+                    <Tip
+                      label={deed.hint}
+                      as="div"
+                      className="w-full"
+                      side="top"
                     >
-                      <span className="desk-deed-mark" aria-hidden="true">
-                        {deed.phase === "running" ? (
-                          <span className="desk-deed-pulse" />
-                        ) : deed.phase === "done" ? (
-                          "✓"
-                        ) : (
-                          "!"
-                        )}
-                      </span>
-                      <span className="desk-deed-label">{deed.label}</span>
-                    </div>
-                  </Tip>
+                      <div
+                        className={`desk-deed ${toneClass}`}
+                        role="status"
+                        aria-label={deed.hint}
+                      >
+                        <span className="desk-deed-mark" aria-hidden="true">
+                          {deed.phase === "running" ? (
+                            <span className="desk-deed-pulse" />
+                          ) : deed.phase === "done" ? (
+                            "✓"
+                          ) : (
+                            "!"
+                          )}
+                        </span>
+                        <span className="desk-deed-label">{deed.label}</span>
+                      </div>
+                    </Tip>
+                    {structurePayload?.chart ? (
+                      <StructureSetupBlock
+                        chart={structurePayload.chart}
+                        scans={structurePayload.scans}
+                      />
+                    ) : null}
+                  </div>
                 );
               }
               return null;

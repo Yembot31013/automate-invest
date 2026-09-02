@@ -1,7 +1,7 @@
 import { Redis } from "@upstash/redis";
 
 import { MAX_USER_WATCHLIST } from "@/lib/limits";
-import type { PaperPosition, WatchlistEntry } from "@/types";
+import type { PaperPosition, WatchlistEntry, TradeAuditEntry } from "@/types";
 
 export class WatchlistLimitError extends Error {
   readonly limit: number;
@@ -58,6 +58,10 @@ function userDeskSettingsKey(userId: string): string {
 
 function userTriggersKey(userId: string): string {
   return `user:${userId}:triggers`;
+}
+
+function userTradeAuditKey(userId: string): string {
+  return `user:${userId}:trade-audit`;
 }
 
 function userTriggersLockKey(userId: string): string {
@@ -338,6 +342,30 @@ export async function saveChatMessages<T>(
 /** Wipe persisted sidekick thread for this user (watchlist/paper untouched). */
 export async function clearChatMessages(userId: string): Promise<void> {
   await getRedis().del(userChatKey(userId));
+}
+
+const MAX_TRADE_AUDIT_ENTRIES = 500;
+
+export async function getTradeAuditEntries(
+  userId: string,
+): Promise<TradeAuditEntry[]> {
+  const raw = await getRedis().get<TradeAuditEntry[]>(
+    userTradeAuditKey(userId),
+  );
+  if (!raw || !Array.isArray(raw)) {
+    return [];
+  }
+  return raw;
+}
+
+/** Append a durable trade/activity row — survives chat clear (capped, no TTL). */
+export async function appendTradeAuditEntry(
+  userId: string,
+  entry: TradeAuditEntry,
+): Promise<void> {
+  const existing = await getTradeAuditEntries(userId);
+  const next = [...existing, entry].slice(-MAX_TRADE_AUDIT_ENTRIES);
+  await getRedis().set(userTradeAuditKey(userId), next);
 }
 
 export async function getSymbolWatchers(symbol: string): Promise<string[]> {

@@ -6,6 +6,8 @@ import { DESK_SNAPSHOT_LIMIT } from "@/lib/limits";
 import { logger } from "@/lib/logger";
 import { getPortfolioSummary, loadSnapshot } from "@/lib/paper";
 import { getUserWatchlist } from "@/lib/redis";
+import { scanForexStructureForSidebar } from "@/lib/structure-scanner";
+import { isForexPair } from "@/lib/symbols";
 import { listUserTriggers } from "@/lib/triggers-store";
 import { MAX_USER_TRIGGERS } from "@/lib/limits";
 
@@ -55,10 +57,35 @@ export async function GET() {
       },
     );
 
+    const fxSymbols = watchlist
+      .map((e) => e.symbol)
+      .filter((sym) => isForexPair(sym))
+      .slice(0, 6);
+    const structureSetups = await mapPool(fxSymbols, 2, async (sym) => {
+      try {
+        return await scanForexStructureForSidebar(sym);
+      } catch (error) {
+        logger.warn("api/desk", "structure sidebar scan failed", {
+          symbol: sym,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return {
+          symbol: sym.toUpperCase(),
+          timeframe: "2H" as const,
+          phase: "none" as const,
+          currentPrice: null,
+          obLow: null,
+          obHigh: null,
+          riskReward: null,
+        };
+      }
+    });
+
     return NextResponse.json({
       watchlist,
       triggers,
       triggerLimit: MAX_USER_TRIGGERS,
+      structureSetups,
       snapshots,
       portfolio: {
         openCount: portfolio.openCount,

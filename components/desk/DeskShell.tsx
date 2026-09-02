@@ -193,6 +193,17 @@ export function DeskShell() {
   const [confirmDisableAuto, setConfirmDisableAuto] = useState(false);
   const [triggers, setTriggers] = useState<DeskTrigger[]>([]);
   const [triggerLimit, setTriggerLimit] = useState(MAX_USER_TRIGGERS);
+  const [structureSetups, setStructureSetups] = useState<
+    Array<{
+      symbol: string;
+      timeframe: string;
+      phase: "in_zone" | "waiting_retrace" | "invalidated" | "none";
+      currentPrice: number | null;
+      obLow: number | null;
+      obHigh: number | null;
+      riskReward: number | null;
+    }>
+  >([]);
   const [busyTrigger, setBusyTrigger] = useState<string | null>(null);
   const [pendingRemoveTrigger, setPendingRemoveTrigger] =
     useState<DeskTrigger | null>(null);
@@ -273,11 +284,21 @@ export function DeskShell() {
           watchlist?: Array<{ symbol: string }>;
           triggers?: DeskTrigger[];
           triggerLimit?: number;
+          structureSetups?: Array<{
+            symbol: string;
+            timeframe: string;
+            phase: "in_zone" | "waiting_retrace" | "invalidated" | "none";
+            currentPrice: number | null;
+            obLow: number | null;
+            obHigh: number | null;
+            riskReward: number | null;
+          }>;
         };
         setSnapshots(data.snapshots ?? []);
         setPortfolio(data.portfolio ?? null);
         setWatchlistCount(data.watchlist?.length ?? data.snapshots?.length ?? 0);
         setTriggers(data.triggers ?? []);
+        setStructureSetups(data.structureSetups ?? []);
         if (typeof data.triggerLimit === "number") {
           setTriggerLimit(data.triggerLimit);
         }
@@ -807,6 +828,54 @@ export function DeskShell() {
             </div>
           ))
         )}
+
+        {structureSetups.some((row) => row.phase !== "none") ? (
+          <>
+            <p className="font-mono-label px-1 pt-3">Structure · FX</p>
+            <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">
+              BOS + FVG + order block on your forex watchlist (2H scan)
+            </p>
+            {structureSetups
+              .filter((row) => row.phase !== "none")
+              .map((row) => (
+                <Tip
+                  key={`structure-${row.symbol}`}
+                  label={`Open structure scan for ${row.symbol} in chat`}
+                  className="block"
+                  as="div"
+                >
+                  <button
+                    type="button"
+                    className="tilt-hover soft-card structure-sidebar-card w-full px-3 py-2.5 text-left"
+                    onClick={() => {
+                      setExternalPrompt(
+                        `Run structure scan on ${row.symbol} — check all timeframes (1H, 2H, 4H, 1D) and show me the chart.`,
+                      );
+                      setMobilePanel("chat");
+                      setComposerFocusKey((n) => n + 1);
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-bold">{row.symbol}</span>
+                      <span
+                        className={`structure-sidebar-badge structure-sidebar-badge--${row.phase}`}
+                      >
+                        {row.phase === "in_zone"
+                          ? "IN ZONE"
+                          : row.phase === "waiting_retrace"
+                            ? "WAITING"
+                            : "WATCH"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[0.68rem] text-[var(--muted)]">
+                      OB {row.obLow?.toFixed(5)} – {row.obHigh?.toFixed(5)} · RR
+                      1:{row.riskReward ?? "—"}
+                    </p>
+                  </button>
+                </Tip>
+              ))}
+          </>
+        ) : null}
 
         <p className="font-mono-label px-1 pt-3">Triggers</p>
         <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">

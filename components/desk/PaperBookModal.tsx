@@ -3,7 +3,9 @@
 import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { EmptyHint } from "@/components/ui/Feedback";
+import { EmptyHint, Spinner } from "@/components/ui/Feedback";
+import { formatChatTime } from "@/lib/chat-time";
+import type { TradeHistoryRow, TradeHistorySummary } from "@/types";
 
 export type PaperPositionRow = {
   id: string;
@@ -29,6 +31,13 @@ type PaperBookModalProps = {
   onClose: () => void;
   onAskSell?: (symbol: string) => void;
 };
+
+type BookTab = "open" | "history";
+
+function sideLabel(row: TradeHistoryRow): string {
+  if (row.event === "skip") return "Skip";
+  return row.side === "buy" ? "Buy" : "Sell";
+}
 
 function formatUsd(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -57,12 +66,59 @@ export function PaperBookModal({
   onAskSell,
 }: PaperBookModalProps) {
   const [mounted, setMounted] = useState(false);
+  const [tab, setTab] = useState<BookTab>("open");
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historySummary, setHistorySummary] = useState<TradeHistorySummary | null>(
+    null,
+  );
+  const [historyRows, setHistoryRows] = useState<TradeHistoryRow[]>([]);
   const titleId = useId();
   const openPositions = positions.filter((p) => p.quantity > 0);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setTab("open");
+    setHistoryError(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || tab !== "history") return;
+    let cancelled = false;
+    setHistoryBusy(true);
+    setHistoryError(null);
+    void fetch("/api/desk/history?limit=40")
+      .then(async (res) => {
+        const data = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          summary?: TradeHistorySummary;
+          entries?: TradeHistoryRow[];
+        };
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.error ?? "Couldn't load history");
+        }
+        if (cancelled) return;
+        setHistorySummary(data.summary ?? null);
+        setHistoryRows(data.entries ?? []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHistoryError(
+          err instanceof Error ? err.message : "Couldn't load history",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,7 +154,7 @@ export function PaperBookModal({
           <div className="min-w-0">
             <p className="font-mono-label">Paper book</p>
             <h3 id={titleId} className="modal-title !mt-0.5 text-xl sm:text-2xl">
-              Your holdings
+              {tab === "open" ? "Your holdings" : "Trade history"}
             </h3>
           </div>
           <button
@@ -110,6 +166,33 @@ export function PaperBookModal({
           </button>
         </div>
 
+        <div className="mt-3 flex shrink-0 gap-2">
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1 text-xs font-bold ${
+              tab === "open"
+                ? "bg-[color-mix(in_srgb,var(--ink)_88%,var(--mix))] text-[var(--white)]"
+                : "bg-[color-mix(in_srgb,var(--ink)_8%,var(--mix))] text-[var(--muted)]"
+            }`}
+            onClick={() => setTab("open")}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1 text-xs font-bold ${
+              tab === "history"
+                ? "bg-[color-mix(in_srgb,var(--ink)_88%,var(--mix))] text-[var(--white)]"
+                : "bg-[color-mix(in_srgb,var(--ink)_8%,var(--mix))] text-[var(--muted)]"
+            }`}
+            onClick={() => setTab("history")}
+          >
+            History
+          </button>
+        </div>
+
+        {tab === "open" ? (
+          <>
         <p className="mt-2 shrink-0 text-[0.75rem] leading-snug text-[var(--muted)]">
           Fake $100k cash · real market prices. Equity = cash left + what open
           positions are worth. PnL = how much those positions are up or down vs
@@ -212,6 +295,81 @@ export function PaperBookModal({
         <p className="mt-3 shrink-0 text-[0.68rem] text-[var(--muted)]">
           Esc or Close to exit · Sell fills the sidekick composer
         </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 shrink-0 text-[0.75rem] leading-snug text-[var(--muted)]">
+              Durable log — survives chat clear. Realized PnL is from closed
+              sells only.
+            </p>
+            {historySummary ? (
+              <p className="mt-2 shrink-0 text-[0.68rem] text-[var(--muted)]">
+                Realized {formatUsd(historySummary.totalRealizedPnl)} ·{" "}
+                {historySummary.sellCount} sells · {historySummary.buyCount} buys
+                {historySummary.skipCount > 0
+                  ? ` · ${historySummary.skipCount} skips`
+                  : ""}
+              </p>
+            ) : null}
+            <div className="paper-book-list mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5">
+              {historyBusy ? (
+                <p className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                  <Spinner size="sm" label="Loading history" />
+                  Loading history…
+                </p>
+              ) : historyError ? (
+                <p className="text-sm text-[color-mix(in_srgb,var(--orange)_80%,var(--ink))]">
+                  {historyError}
+                </p>
+              ) : historyRows.length === 0 ? (
+                <EmptyHint
+                  title="No trades yet"
+                  body="Buys, sells, and skips show up here with full numbers."
+                />
+              ) : (
+                historyRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="rounded-[16px] border border-[color-mix(in_srgb,var(--ink)_10%,transparent)] bg-[color-mix(in_srgb,var(--white)_55%,var(--mix))] px-3 py-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-display text-base font-bold text-[var(--ink)]">
+                          {row.event === "skip" ? row.symbol : `${sideLabel(row)} · ${row.symbol}`}
+                        </p>
+                        <p className="text-[0.72rem] text-[var(--muted)]">
+                          {formatChatTime(row.at)} · {row.source}
+                          {row.legacy ? " · legacy" : ""}
+                        </p>
+                      </div>
+                      {row.event === "fill" ? (
+                        <p className="shrink-0 text-right text-sm font-semibold text-[var(--ink)]">
+                          {formatUsd(row.notionalUsd)}
+                        </p>
+                      ) : null}
+                    </div>
+                    {row.event === "fill" ? (
+                      <p className="mt-1 text-[0.72rem] text-[var(--muted)]">
+                        {row.quantity} @ {formatUsd(row.price)}
+                        {row.side === "sell" && row.realizedPnl != null
+                          ? ` · PnL ${formatUsd(row.realizedPnl)} (${formatPct(row.realizedPnlPct ?? 0)})`
+                          : ""}
+                        {row.partial ? " · partial" : ""}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[0.72rem] text-[var(--muted)]">
+                        {row.reason}
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="mt-3 shrink-0 text-[0.68rem] text-[var(--muted)]">
+              Esc or Close to exit
+            </p>
+          </>
+        )}
       </div>
     </div>,
     document.body,

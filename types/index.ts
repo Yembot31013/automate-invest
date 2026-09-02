@@ -106,6 +106,81 @@ export interface PortfolioSummary {
   totalUnrealizedPnlPct: number;
 }
 
+/** Who/what caused a paper fill — stored durably outside chat. */
+export type TradeAuditSource = "manual" | "trigger" | "auto";
+
+/** Frozen tape at fill/skip time (same shape as desk event tape). */
+export type TradeAuditTape = {
+  price: number;
+  changePct: number;
+  alertType?: "dip" | "breakout";
+  pnlPct?: number;
+};
+
+/** Durable ledger row — survives chat clear. */
+export type TradeAuditEntry =
+  | {
+      id: string;
+      at: string;
+      event: "fill";
+      side: "buy" | "sell";
+      source: TradeAuditSource;
+      symbol: string;
+      exchange: string;
+      positionId: string;
+      quantity: number;
+      price: number;
+      notionalUsd: number;
+      cashAfter: number;
+      entryPrice?: number;
+      entryAt?: string;
+      exitPrice?: number;
+      exitAt?: string;
+      realizedPnl?: number;
+      realizedPnlPct?: number;
+      partial?: boolean;
+      remainingQty?: number;
+      triggerId?: string;
+      triggerSummary?: string;
+      autoReason?: "dip" | "stop" | "trail";
+      notes?: string;
+      tape?: TradeAuditTape;
+    }
+  | {
+      id: string;
+      at: string;
+      event: "skip";
+      source: TradeAuditSource;
+      symbol: string;
+      reason: string;
+      triggerId?: string;
+      triggerSummary?: string;
+      autoReason?: string;
+      tape?: TradeAuditTape;
+    };
+
+export type TradeFillAuditEntry = Extract<TradeAuditEntry, { event: "fill" }>;
+export type TradeSkipAuditEntry = Extract<TradeAuditEntry, { event: "skip" }>;
+
+/** Aggregated closed-trade stats for AI + UI. */
+export type TradeHistorySummary = {
+  fillCount: number;
+  buyCount: number;
+  sellCount: number;
+  skipCount: number;
+  totalRealizedPnl: number;
+  winningSells: number;
+  losingSells: number;
+  cash: number;
+  openCount: number;
+  equity: number;
+};
+
+export type TradeHistoryRow = (TradeFillAuditEntry | TradeSkipAuditEntry) & {
+  /** True when reconstructed from a closed lot (pre-audit legacy). */
+  legacy?: boolean;
+};
+
 /** Counterfactual “what if we bought…” result. */
 export interface WhatIfResult {
   symbol: string;

@@ -8,7 +8,8 @@ export type DeskEventKind =
   | "trigger-attention"
   | "trigger-buy"
   | "trigger-sell"
-  | "trigger-skip";
+  | "trigger-skip"
+  | "structure-entry";
 
 /** Mark + context frozen at event time — for then-vs-now comparison. */
 export type DeskEventTape = {

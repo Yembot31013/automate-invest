@@ -10,6 +10,7 @@ import { appendDeskEvent, tapeFromSnapshot } from "@/lib/desk-events";
 import { sendAttentionEmail } from "@/lib/email/attention";
 import { logger } from "@/lib/logger";
 import { getPortfolioSummary, paperBuy, paperSellSymbol, type PaperSellClose } from "@/lib/paper";
+import { recordTradeSkipAudit, type TradeAuditContext } from "@/lib/trade-audit";
 import {
   getSymbolTriggerUsers,
   incrementTriggerBuyStatsToday,
@@ -169,6 +170,12 @@ async function fireTriggerAction(params: {
     positions,
   } = params;
   const triggerTape = tapeFromSnapshot(snapshot);
+  const triggerAudit: TradeAuditContext = {
+    source: "trigger",
+    triggerId: trigger.id,
+    triggerSummary: formatTriggerSummary(trigger),
+    tape: triggerTape,
+  };
 
   if (trigger.action === "attention") {
     await notifyTriggerAttention({ userId, trigger, snapshot });
@@ -199,6 +206,12 @@ async function fireTriggerAction(params: {
         symbol: trigger.symbol,
         tape: triggerTape,
       });
+      await recordTradeSkipAudit({
+        userId,
+        symbol: trigger.symbol,
+        reason: block.reason,
+        audit: triggerAudit,
+      });
       await notifyTriggerAttention({
         userId,
         trigger,
@@ -220,6 +233,7 @@ async function fireTriggerAction(params: {
         quantity: qty,
         entryPrice: snapshot.currentPrice,
         notes: `trigger:${trigger.id}`,
+        audit: triggerAudit,
       });
       await incrementTriggerBuyStatsToday(userId, trigger.notionalUsd);
       const chip = triggerBuyCopy({
@@ -255,6 +269,12 @@ async function fireTriggerAction(params: {
         symbol: trigger.symbol,
         tape: triggerTape,
       });
+      await recordTradeSkipAudit({
+        userId,
+        symbol: trigger.symbol,
+        reason: message,
+        audit: triggerAudit,
+      });
       await notifyTriggerAttention({
         userId,
         trigger,
@@ -279,6 +299,12 @@ async function fireTriggerAction(params: {
         symbol: trigger.symbol,
         tape: triggerTape,
       });
+      await recordTradeSkipAudit({
+        userId,
+        symbol: trigger.symbol,
+        reason: "no open lot",
+        audit: triggerAudit,
+      });
       await notifyTriggerAttention({
         userId,
         trigger,
@@ -291,6 +317,7 @@ async function fireTriggerAction(params: {
       userId,
       symbol: trigger.symbol,
       close: sellCloseFromTrigger(trigger),
+      audit: triggerAudit,
     });
     if (sold.closedCount === 0) {
       const chip = triggerSkipCopy({
@@ -303,6 +330,12 @@ async function fireTriggerAction(params: {
         hint: chip.hint,
         symbol: trigger.symbol,
         tape: triggerTape,
+      });
+      await recordTradeSkipAudit({
+        userId,
+        symbol: trigger.symbol,
+        reason: sold.message ?? "no open lot",
+        audit: triggerAudit,
       });
       await notifyTriggerAttention({
         userId,
@@ -351,6 +384,12 @@ async function fireTriggerAction(params: {
       hint: skipChip.hint,
       symbol: trigger.symbol,
       tape: triggerTape,
+    });
+    await recordTradeSkipAudit({
+      userId,
+      symbol: trigger.symbol,
+      reason: message,
+      audit: triggerAudit,
     });
     await notifyTriggerAttention({
       userId,

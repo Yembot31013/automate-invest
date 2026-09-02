@@ -161,3 +161,20 @@ export function triggerSkipCopy(params: {
     hint: `User trigger condition met but action skipped · ${params.message}`,
   };
 }
+
+export function structureEntryCopy(params: {
+  setup: {
+    symbol: string;
+    timeframe: string;
+    obLow: number;
+    obHigh: number;
+    riskReward: number;
+  };
+  emailed: boolean;
+}): DeskEventCopy {
+  const { setup, emailed } = params;
+  return {
+    text: `${setup.symbol} ${setup.timeframe} — price in the order block zone 📍`,
+    hint: `Structure scan · BOS+FVG+OB · zone ${setup.obLow.toFixed(5)}–${setup.obHigh.toFixed(5)} · RR ~1:${setup.riskReward} · ${emailed ? "email sent" : "no email on file"} · no trade`,
+  };
+}

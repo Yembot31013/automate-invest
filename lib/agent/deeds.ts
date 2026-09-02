@@ -247,6 +247,16 @@ const DEED_COPY: Record<string, DeedCopy> = {
     done: "Paper book marked",
     error: "Couldn't mark the paper book",
   },
+  tradeHistory: {
+    running: "Loading trade history…",
+    done: "Trade history loaded",
+    error: "Couldn't load trade history",
+  },
+  getStructureSetup: {
+    running: "Scanning 2H structure…",
+    done: "Structure scan ready",
+    error: "Couldn't scan structure",
+  },
   whatIf: {
     running: "Running a what-if…",
     done: "What-if ready",
@@ -535,6 +545,38 @@ function deedHint(params: {
       }
       if (pnl) bits.push(`PnL ${pnl}`);
       return bits.join(" · ");
+    }
+    case "tradeHistory": {
+      if (phase === "running") return "Loading your trade history";
+      if (phase === "error") return err ?? "Couldn't load trade history";
+      const count = typeof outRec?.count === "number" ? outRec.count : null;
+      const summary = asRec(outRec?.summary);
+      const realized = summary ? money(summary.totalRealizedPnl) : null;
+      const bits = [
+        count != null ? `Trade history (${count} rows)` : "Trade history loaded",
+      ];
+      if (realized) bits.push(`realized ${realized}`);
+      return bits.join(" · ");
+    }
+    case "getStructureSetup": {
+      const sym =
+        (typeof outRec?.symbol === "string" && outRec.symbol) ||
+        subject ||
+        "FX pair";
+      if (phase === "running") return `Scanning 2H structure on ${sym}`;
+      if (phase === "error") return err ?? "Couldn't scan structure";
+      if (outRec?.ok === false) {
+        return typeof outRec.error === "string"
+          ? outRec.error
+          : `Structure scan failed for ${sym}`;
+      }
+      const setup = asRec(outRec?.setup);
+      if (!setup) {
+        return `No bullish BOS+FVG+OB setup on ${sym} right now`;
+      }
+      const phaseLabel =
+        setup.phase === "in_zone" ? "in order block zone" : "waiting retrace";
+      return `Structure on ${sym} · ${phaseLabel}`;
     }
     case "whatIf": {
       const sym = subject || "that ticker";

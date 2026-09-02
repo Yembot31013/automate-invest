@@ -21,6 +21,7 @@ import {
   withUserPaperLock,
 } from "@/lib/redis";
 import { getPortfolioSummary, paperBuy, paperSell } from "@/lib/paper";
+import { recordTradeSkipAudit } from "@/lib/trade-audit";
 import { findWatchlistSymbol } from "@/lib/symbols";
 import type { AlertPayload } from "@/types";
 import type { DeskSettings } from "@/lib/desk-settings";
@@ -115,7 +116,19 @@ export async function runAutoTradeForUserAlert(params: {
   for (const action of plan) {
     try {
       if (action.type === "exit") {
-        await paperSell({ userId, symbol: action.symbol });
+        const autoReason = action.reason === "stop" ? "stop" : "trail";
+        await paperSell({
+          userId,
+          symbol: action.symbol,
+          audit: {
+            source: "auto",
+            autoReason,
+            tape: tapeFromSnapshot(alert.snapshot, {
+              alertType: alert.type,
+              pnlPct: action.pnlPct,
+            }),
+          },
+        });
         traded = true;
         const label = action.reason === "stop" ? "stop-loss" : "trail exit";
         const chip = autoExitCopy({
@@ -140,6 +153,11 @@ export async function runAutoTradeForUserAlert(params: {
           symbol: action.symbol,
           quantity: action.quantity,
           notes: "auto-entry:dip",
+          audit: {
+            source: "auto",
+            autoReason: "dip",
+            tape: alertTape,
+          },
         });
         await incrementAutoBuyCountToday(userId);
         traded = true;
@@ -169,6 +187,12 @@ export async function runAutoTradeForUserAlert(params: {
           symbol: action.symbol,
           tape: alertTape,
         });
+        await recordTradeSkipAudit({
+          userId,
+          symbol: action.symbol,
+          reason: action.reason,
+          audit: { source: "auto", tape: alertTape },
+        });
       }
     } catch (error) {
       const message =
@@ -189,6 +213,12 @@ export async function runAutoTradeForUserAlert(params: {
         hint: chip.hint,
         symbol: alert.snapshot.symbol,
         tape: alertTape,
+      });
+      await recordTradeSkipAudit({
+        userId,
+        symbol: alert.snapshot.symbol,
+        reason: message,
+        audit: { source: "auto", tape: alertTape },
       });
     }
   }

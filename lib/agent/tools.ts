@@ -3,6 +3,13 @@ import { z } from "zod";
 
 import { verifyTradableSymbolDetailed } from "@/lib/market";
 import {
+  formatStructureSetup,
+  pickBestStructureScan,
+  scanForexStructureAllTimeframes,
+  scanForexStructureDetailed,
+} from "@/lib/structure-scanner";
+import { normalizeStructureTimeframe } from "@/lib/structure/timeframes";
+import {
   convertForeignToNgn,
   convertNgnToForeign,
   fetchNgxForexQuote,
@@ -31,6 +38,7 @@ import { sendCapabilityGapEmail } from "@/lib/email/resend";
 import { MAX_USER_TRIGGERS, MAX_USER_WATCHLIST } from "@/lib/limits";
 import {
   findWatchlistSymbol,
+  isForexPair,
   resolveSymbolInput,
 } from "@/lib/symbols";
 import { computeWhatIf } from "@/lib/whatif";
@@ -54,6 +62,7 @@ import {
 } from "@/lib/triggers";
 import { formatGuardrailsSummary } from "@/lib/trigger-guardrails";
 import { loadTriggerBookContext } from "@/lib/trigger-sync";
+import { getTradeHistory } from "@/lib/trade-audit";
 import { createToolDedupeCache } from "@/lib/agent/tool-dedupe";
 import { mapPool } from "@/lib/concurrency";
 import {
@@ -956,7 +965,11 @@ export function createDeskTools(userId: string) {
         notes: z.string().optional(),
       }),
       execute: async (input) => {
-        const position = await paperBuy({ userId, ...input });
+        const position = await paperBuy({
+          userId,
+          ...input,
+          audit: { source: "manual" },
+        });
         return {
           id: position.id,
           symbol: position.symbol,
@@ -978,7 +991,11 @@ export function createDeskTools(userId: string) {
         exitPrice: z.number().positive().optional(),
       }),
       execute: async (input) => {
-        const position = await paperSell({ userId, ...input });
+        const position = await paperSell({
+          userId,
+          ...input,
+          audit: { source: "manual" },
+        });
         return {
           ok: true,
           id: position.id,
@@ -1008,7 +1025,11 @@ export function createDeskTools(userId: string) {
       }),
       execute: async (input) => {
         try {
-          return await paperSellMany({ userId, ...input });
+          return await paperSellMany({
+            userId,
+            ...input,
+            audit: { source: "manual" },
+          });
         } catch (error) {
           return {
             ok: false,
@@ -1053,6 +1074,126 @@ export function createDeskTools(userId: string) {
             })),
           };
         }),
+    }),
+
+    tradeHistory: tool({
+      description:
+        "Durable paper trade log (buys, sells, skips with full numbers) — stored outside chat and survives clear. Use when they ask trading history, closed trades, realized PnL, what bought/sold when, or overnight fills after chat was cleared. NOT portfolioPnL (that is open book + unrealized only). Call at most ONCE per message.",
+      inputSchema: z.object({
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Max rows to return (default 50, newest first)"),
+        symbol: z
+          .string()
+          .optional()
+          .describe("Filter to one ticker, e.g. SOL/USD or TSLA"),
+      }),
+      execute: async ({ limit, symbol }) =>
+        dedupe("tradeHistory", async () => {
+          const { summary, entries } = await getTradeHistory({
+            userId,
+            limit,
+            symbol,
+          });
+          return {
+            summary,
+            count: entries.length,
+            entries,
+          };
+        }),
+    }),
+
+    getStructureSetup: tool({
+      description:
+        "Scan a forex pair for bullish BOS + FVG + order-block structure on intraday candles (1H, 2H, 4H, or 1D). Returns an annotated chart + level table in the UI. Use allTimeframes when they want every timeframe checked. NOT for daily getSnapshot guessing.",
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .describe("Forex pair e.g. EUR/USD, GBP/USD, NZD/USD, EUR/AUD"),
+        timeframe: z
+          .enum(["1H", "2H", "4H", "1D"])
+          .optional()
+          .describe("Chart timeframe — default 2H (tester's primary FX frame)"),
+        allTimeframes: z
+          .boolean()
+          .optional()
+          .describe(
+            "When true, scan 1H + 2H + 4H + 1D and return tabs for each hit",
+          ),
+      }),
+      execute: async ({ symbol, timeframe, allTimeframes }) => {
+        const resolved = resolveSymbolInput(symbol);
+        const tf = normalizeStructureTimeframe(timeframe);
+        const key = `getStructureSetup:${resolved.symbol}:${allTimeframes ? "all" : tf}`;
+        return dedupe(key, async () => {
+          if (!isForexPair(resolved.symbol)) {
+            return {
+              ok: false,
+              error: `Structure scan is forex-only. ${resolved.symbol || symbol} is not a supported FX pair.`,
+            };
+          }
+
+          if (allTimeframes) {
+            const scans = await scanForexStructureAllTimeframes(resolved.symbol);
+            const best = pickBestStructureScan(scans);
+            const hits = scans.filter((s) => s.setup != null);
+            if (!best?.setup) {
+              return {
+                ok: true,
+                symbol: resolved.symbol,
+                setup: null,
+                chart: null,
+                scans: scans.map((s) => ({
+                  timeframe: s.timeframe,
+                  setup: s.setup,
+                  chart: s.chart,
+                  barCount: s.barCount,
+                })),
+                message:
+                  "No valid bullish BOS+FVG+OB setup on 1H, 2H, 4H, or 1D right now.",
+              };
+            }
+            return {
+              ok: true,
+              symbol: resolved.symbol,
+              setup: best.setup,
+              chart: best.chart,
+              scans: scans.map((s) => ({
+                timeframe: s.timeframe,
+                setup: s.setup,
+                chart: s.chart,
+                barCount: s.barCount,
+              })),
+              hitCount: hits.length,
+              formatted: formatStructureSetup(best.setup),
+            };
+          }
+
+          const row = await scanForexStructureDetailed(resolved.symbol, tf);
+          if (!row.setup) {
+            return {
+              ok: true,
+              symbol: resolved.symbol,
+              timeframe: tf,
+              setup: null,
+              chart: null,
+              message: `No valid bullish BOS+FVG+OB setup on ${tf} right now.`,
+            };
+          }
+          return {
+            ok: true,
+            symbol: resolved.symbol,
+            timeframe: tf,
+            setup: row.setup,
+            chart: row.chart,
+            formatted: formatStructureSetup(row.setup),
+          };
+        });
+      },
     }),
 
     whatIf: tool({

@@ -16,6 +16,11 @@ import {
 } from "@/lib/symbols";
 import { selectOpenPositionsToSell } from "@/lib/paper-select";
 import {
+  recordTradeBuyAudit,
+  recordTradeSellAudit,
+  type TradeAuditContext,
+} from "@/lib/trade-audit";
+import {
   getPaperCash,
   getPaperPositions,
   savePaperPositions,
@@ -71,6 +76,8 @@ function toMark(
   };
 }
 
+export type { TradeAuditContext } from "@/lib/trade-audit";
+
 export async function paperBuy(params: {
   userId: string;
   symbol: string;
@@ -78,6 +85,7 @@ export async function paperBuy(params: {
   exchange?: string;
   entryPrice?: number;
   notes?: string;
+  audit?: TradeAuditContext;
 }): Promise<PaperPositionMark & { cashRemaining: number }> {
   return withUserPaperLock(params.userId, async () => {
     const resolved = resolveSymbolInput(params.symbol);
@@ -139,6 +147,13 @@ export async function paperBuy(params: {
     const cashRemaining = cash - cost;
     await setPaperCash(params.userId, cashRemaining);
 
+    await recordTradeBuyAudit({
+      userId: params.userId,
+      position,
+      cashAfter: cashRemaining,
+      audit: params.audit,
+    });
+
     return { ...toMark(position, entryPrice), cashRemaining };
   }).then(async (result) => {
     const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
@@ -152,6 +167,7 @@ export async function paperSell(params: {
   symbol?: string;
   positionId?: string;
   exitPrice?: number;
+  audit?: TradeAuditContext;
 }): Promise<PaperPositionMark & { cashRemaining: number }> {
   return withUserPaperLock(params.userId, async () => {
     const positions = await getPaperPositions(params.userId);
@@ -194,6 +210,14 @@ export async function paperSell(params: {
 
     const next = positions.map((p) => (p.id === closed.id ? closed : p));
     await savePaperPositions(params.userId, next);
+    await recordTradeSellAudit({
+      userId: params.userId,
+      closed,
+      cashAfter: cashRemaining,
+      audit: params.audit,
+      entryPrice: target.entryPrice,
+      entryAt: target.entryAt,
+    });
     return { ...toMark(closed, exitPrice), cashRemaining };
   }).then(async (result) => {
     const { syncTriggersWithPaperBook } = await import("@/lib/trigger-sync");
@@ -210,6 +234,7 @@ export async function paperSellMany(params: {
   userId: string;
   sellAll?: boolean;
   symbols?: string[];
+  audit?: TradeAuditContext;
 }): Promise<{
   ok: boolean;
   closedCount: number;
@@ -278,6 +303,19 @@ export async function paperSellMany(params: {
     await savePaperPositions(params.userId, next);
     await setPaperCash(params.userId, cashRemaining);
 
+    for (const target of targets) {
+      const closed = closedById.get(target.id);
+      if (!closed) continue;
+      await recordTradeSellAudit({
+        userId: params.userId,
+        closed,
+        cashAfter: cashRemaining,
+        audit: params.audit,
+        entryPrice: target.entryPrice,
+        entryAt: target.entryAt,
+      });
+    }
+
     const remainingOpen = next.filter((p) => p.status === "open").length;
 
     return {
@@ -327,6 +365,7 @@ export async function paperSellSymbol(params: {
   userId: string;
   symbol: string;
   close: PaperSellClose;
+  audit?: TradeAuditContext;
 }): Promise<{
   ok: boolean;
   closedCount: number;
@@ -349,6 +388,7 @@ export async function paperSellSymbol(params: {
     const sold = await paperSellMany({
       userId: params.userId,
       symbols: [params.symbol],
+      audit: params.audit,
     });
     const closedQty = sold.closed.reduce((sum, c) => sum + c.quantity, 0);
     return {
@@ -414,6 +454,14 @@ export async function paperSellSymbol(params: {
       const next = positions.map((p) => (p.id === closed.id ? closed : p));
       await savePaperPositions(params.userId, next);
       await setPaperCash(params.userId, cashRemaining);
+      await recordTradeSellAudit({
+        userId: params.userId,
+        closed,
+        cashAfter: cashRemaining,
+        audit: params.audit,
+        entryPrice: target.entryPrice,
+        entryAt: target.entryAt,
+      });
       const mark = toMark(closed, exitPrice);
       const remainingOpen = next.filter((p) => p.status === "open").length;
       return {
@@ -462,6 +510,16 @@ export async function paperSellSymbol(params: {
       .concat([remainder, closedSlice]);
     await savePaperPositions(params.userId, next);
     await setPaperCash(params.userId, cashRemaining);
+    await recordTradeSellAudit({
+      userId: params.userId,
+      closed: closedSlice,
+      cashAfter: cashRemaining,
+      audit: params.audit,
+      partial: true,
+      remainingQty: remainderQty,
+      entryPrice: target.entryPrice,
+      entryAt: target.entryAt,
+    });
 
     const mark = toMark(closedSlice, exitPrice);
     const remainingOpen = next.filter((p) => p.status === "open").length;
