@@ -430,7 +430,15 @@ export function createDeskTools(userId: string) {
           };
         }
         try {
-          const verified = await verifyTradableSymbolDetailed(symbol, exchange);
+          const resolved = resolveSymbolInput(symbol, exchange);
+          const watchlist = await getUserWatchlist(userId);
+          const watched = watchlist.find(
+            (entry) =>
+              entry.symbol.toUpperCase() === resolved.symbol.toUpperCase(),
+          );
+          const verified = watched
+            ? { symbol: watched.symbol, exchange: watched.exchange }
+            : await verifyTradableSymbolDetailed(symbol, exchange);
           const size = normalizeNotionalUsd(notionalUsd);
           const sellClose = normalizeTriggerSellClose(
             action as TriggerAction,

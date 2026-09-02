@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { StructureSetupModal } from "@/components/desk/StructureSetupModal";
 import type { StructureChartPayload } from "@/lib/structure/chart-payload";
+import { structureArmBuyZoneAlertPrompt } from "@/lib/structure/arm-alert-prompt";
 
 function fx(value: number): string {
   return value.toFixed(5);
@@ -18,17 +19,23 @@ function phaseBadgeClass(phase: StructureChartPayload["phase"]): string {
 type StructureSetupBlockProps = {
   chart: StructureChartPayload;
   scans?: Array<{ timeframe: string; chart: StructureChartPayload | null }>;
+  /** Fill chat composer (user still sends). */
+  onFillComposer?: (text: string) => void;
 };
 
 /** Compact chat card — full chart opens in a modal (keeps chat clean). */
 export function StructureSetupBlock({
   chart,
   scans = [],
+  onFillComposer,
 }: StructureSetupBlockProps) {
   const [open, setOpen] = useState(false);
   const { levels, phase, symbol, timeframe } = chart;
-  const tfCount =
-    scans.filter((s) => s.chart).length || 1;
+  const tfCount = scans.filter((s) => s.chart).length || 1;
+
+  function armBuyZoneAlert() {
+    onFillComposer?.(structureArmBuyZoneAlertPrompt(chart));
+  }
 
   return (
     <>
@@ -74,13 +81,24 @@ export function StructureSetupBlock({
           </div>
         </div>
 
-        <button
-          type="button"
-          className="structure-preview-open btn-primary w-full !py-2.5 text-sm"
-          onClick={() => setOpen(true)}
-        >
-          Open full chart
-        </button>
+        <div className="structure-preview-actions">
+          <button
+            type="button"
+            className="structure-preview-open btn-primary"
+            onClick={() => setOpen(true)}
+          >
+            Open full chart
+          </button>
+          {onFillComposer ? (
+            <button
+              type="button"
+              className="structure-preview-arm btn-ghost"
+              onClick={armBuyZoneAlert}
+            >
+              Arm buy-zone alert
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <StructureSetupModal

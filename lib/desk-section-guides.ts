@@ -63,6 +63,7 @@ export const DESK_SECTION_GUIDES: Record<DeskSectionId, DeskSectionGuide> = {
           "Order block (OB) = the buy zone band you see on the card",
           "RR 1:2 = risk vs reward (e.g. risk $1 to aim for $2)",
           "Cron + Sidekick can open a setup map with purple OB, stop, and target labels",
+          "Arm buy-zone alert fills chat with a draft trigger (alert only) — you review and send",
         ],
       },
       {
@@ -76,15 +77,15 @@ export const DESK_SECTION_GUIDES: Record<DeskSectionId, DeskSectionGuide> = {
       },
       {
         heading: "What it does not do",
-        body: "Structure does not auto-buy. It surfaces levels + chart + email when price enters the zone. You (or Sidekick on your say-so) decide what to do next.",
+        body: "Structure does not auto-buy or auto-create triggers. Use Arm buy-zone alert to draft an attention rule at the order-block top, then send it in chat if you want it armed.",
       },
     ],
     example: {
       title: "Example",
-      body: "NZD/USD shows IN ZONE · OB 0.58948–0.59004 · RR 1:2. Tap the row → Sidekick opens the full setup map. Green/red box = target vs stop; purple band = order block.",
+      body: "NZD/USD shows IN ZONE · OB 0.58948–0.59004 · RR 1:2. On the chat setup card, tap Arm buy-zone alert → chat fills with a natural “ping me at this level” ask. You hit send when ready.",
     },
     compare:
-      "Unlike Triggers (your custom rules), Structure is a fixed FX pattern detector. Unlike the watchlist (any asset), Structure only runs on forex pairs you’ve pinned.",
+      "Unlike Triggers (your custom rules), Structure is a fixed FX pattern detector. Arm buy-zone alert on the chat card drafts a trigger from the setup levels. Unlike the watchlist (any asset), Structure only runs on forex pairs you’ve pinned.",
   },
   triggers: {
     id: "triggers",

@@ -356,11 +356,18 @@ function deedHint(params: {
         : `Read your triggers (${count})`;
     }
     case "createTrigger": {
-      if (phase === "running") return "Arming a trigger";
-      if (phase === "error") return err ?? "Couldn't create trigger";
+      const sym =
+        subject ||
+        (typeof inRec?.symbol === "string" && normalizeSymbol(inRec.symbol)) ||
+        "that ticker";
+      if (phase === "running") return `Arming an alert on ${sym}`;
+      if (phase === "error") {
+        // Keep product voice — never dump Yahoo/verify stack into the chip tip.
+        return `Couldn't arm that ${sym} alert — try again in a moment`;
+      }
       const summary =
         typeof outRec?.summary === "string" ? outRec.summary : null;
-      return summary ? `Armed trigger · ${summary}` : "Armed a trigger";
+      return summary ? `Armed · ${summary}` : `Armed alert on ${sym}`;
     }
     case "updateTrigger": {
       if (phase === "running") return "Updating a trigger";

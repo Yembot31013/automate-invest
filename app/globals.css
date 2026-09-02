@@ -1897,8 +1897,23 @@ body {
   line-height: 1.3;
 }
 
-.structure-preview-open {
-  margin-top: 2px;
+.structure-preview-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.structure-preview-open,
+.structure-preview-arm {
+  width: 100%;
+  padding-top: 0.55rem !important;
+  padding-bottom: 0.55rem !important;
+  font-size: 0.82rem !important;
+}
+
+.structure-preview-arm {
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent) !important;
 }
 
 /* Full-screen structure modal */

@@ -44,6 +44,39 @@ const VOLUME_AVG_PERIOD = 20;
 const DIP_THRESHOLD_PCT = 8;
 const VOLUME_SURGE_RATIO = 2;
 const OHLC_CACHE_TTL = 300;
+
+const YAHOO_FETCH_HEADERS = {
+  Accept: "application/json",
+  "User-Agent": "SignalDesk/1.0",
+} as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** One retry on transient Yahoo/network failures. */
+async function fetchYahooChart(url: URL): Promise<Response> {
+  const run = async () => {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: YAHOO_FETCH_HEADERS,
+      cache: "no-store",
+    });
+    if (response.status === 429 || response.status >= 500) {
+      throw new MarketDataError(
+        `Yahoo chart temporary error: ${response.status} ${response.statusText}`,
+      );
+    }
+    return response;
+  };
+
+  try {
+    return await run();
+  } catch (first) {
+    await sleep(450);
+    return run();
+  }
+}
 const SENTIMENT_CACHE_TTL = 600;
 const NEWS_CACHE_TTL = 300;
 
@@ -371,14 +404,7 @@ export async function fetchYahooDailyOhlc(
   url.searchParams.set("interval", "1d");
   url.searchParams.set("range", range);
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "SignalDesk/1.0",
-    },
-    cache: "no-store",
-  });
+  const response = await fetchYahooChart(url);
 
   if (!response.ok) {
     throw new MarketDataError(
@@ -445,14 +471,7 @@ export async function fetchYahooIntradayOhlc(
   url.searchParams.set("interval", interval);
   url.searchParams.set("range", range);
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "SignalDesk/1.0",
-    },
-    cache: "no-store",
-  });
+  const response = await fetchYahooChart(url);
 
   if (!response.ok) {
     throw new MarketDataError(

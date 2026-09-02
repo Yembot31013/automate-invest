@@ -697,6 +697,7 @@ function DeskChatSession({
                       <StructureSetupBlock
                         chart={structurePayload.chart}
                         scans={structurePayload.scans}
+                        onFillComposer={requestFillDraft}
                       />
                     ) : null}
                   </div>
