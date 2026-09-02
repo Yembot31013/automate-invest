@@ -2345,6 +2345,10 @@ body {
   text-underline-offset: 2px;
 }
 
+.structure-tv-offchart-note-muted {
+  opacity: 0.75;
+}
+
 .structure-trade-offchart-hint {
   margin: 0 0 10px;
   padding: 8px 10px;

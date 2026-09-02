@@ -1,7 +1,18 @@
 import { ColorType, type DeepPartial, type ChartOptions } from "lightweight-charts";
 
+/** Forex pairs — 5 decimals on axis labels (matches TradingView). */
+export const TV_FOREX_PRICE_FORMAT = {
+  type: "price" as const,
+  precision: 5,
+  minMove: 0.00001,
+};
+
 /** TradingView-style chart colors (dark / light). */
 export function tvChartOptions(theme: "light" | "dark"): DeepPartial<ChartOptions> {
+  const localization = {
+    priceFormatter: (price: number) => price.toFixed(5),
+  };
+
   if (theme === "dark") {
     return {
       layout: {
@@ -34,6 +45,7 @@ export function tvChartOptions(theme: "light" | "dark"): DeepPartial<ChartOption
         timeVisible: true,
         secondsVisible: false,
       },
+      localization,
     };
   }
 
@@ -68,6 +80,7 @@ export function tvChartOptions(theme: "light" | "dark"): DeepPartial<ChartOption
       timeVisible: true,
       secondsVisible: false,
     },
+    localization,
   };
 }
 
@@ -79,6 +92,8 @@ export const TV_ZONE_COLORS = {
   loss: "rgba(239, 83, 80, 0.28)",
   orderBlock: "rgba(156, 120, 255, 0.38)",
   fvg: "rgba(38, 166, 154, 0.18)",
+  profitCompact: "rgba(38, 166, 154, 0.22)",
+  lossCompact: "rgba(239, 83, 80, 0.22)",
 };
 
 export const TV_LINE_COLORS = {

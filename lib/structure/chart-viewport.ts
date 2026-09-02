@@ -5,6 +5,8 @@ import type { LwcZoneSpec } from "./lwc-setup-overlay";
 const ZONE = {
   profit: "rgba(38, 166, 154, 0.28)",
   loss: "rgba(239, 83, 80, 0.28)",
+  profitCompact: "rgba(38, 166, 154, 0.22)",
+  lossCompact: "rgba(239, 83, 80, 0.22)",
   orderBlock: "rgba(156, 120, 255, 0.38)",
   fvg: "rgba(38, 166, 154, 0.18)",
 } as const;
@@ -19,6 +21,10 @@ export type PriceViewport = {
 
 type Ut = import("lightweight-charts").UTCTimestamp;
 
+export function entryPrice(levels: StructureChartPayload["levels"]): number {
+  return (levels.obLow + levels.obHigh) / 2;
+}
+
 export function setupViewport(
   bars: StructureChartPayload["bars"],
   levels: StructureChartPayload["levels"],
@@ -27,15 +33,17 @@ export function setupViewport(
     ...bars.map((b) => b.l),
     levels.obLow,
     levels.fvgLow,
+    levels.currentPrice,
   );
   const coreMax = Math.max(
     ...bars.map((b) => b.h),
     levels.bosPrice,
     levels.fvgHigh,
     levels.obHigh,
+    levels.currentPrice,
   );
   const span = coreMax - coreMin || levels.currentPrice * 0.001;
-  const pad = span * 0.14;
+  const pad = span * 0.12;
   return { min: coreMin - pad, max: coreMax + pad, span };
 }
 
@@ -65,20 +73,29 @@ export function slTpOffChart(
   );
 }
 
-export function buildZoneSpecs(
-  chart: StructureChartPayload,
-  mode: ChartZoomMode,
-): LwcZoneSpec[] {
-  const { bars, levels, bosBarIndex } = chart;
-  const bosBar = bars[bosBarIndex] ?? bars[0]!;
-  const lastBar = bars[bars.length - 1]!;
-  const obBar = bars[Math.max(0, bosBarIndex - 1)] ?? bosBar;
-  const entry = (levels.obLow + levels.obHigh) / 2;
-  const bosTime = bosBar.t as Ut;
-  const lastTime = lastBar.t as Ut;
-  const obTime = obBar.t as Ut;
+export function canExpandFullTradeAxis(
+  bars: StructureChartPayload["bars"],
+  levels: StructureChartPayload["levels"],
+): boolean {
+  const setup = setupViewport(bars, levels);
+  const rrSpan = levels.takeProfit - levels.stopLoss;
+  return rrSpan <= setup.span * 4;
+}
 
-  const structureZones: LwcZoneSpec[] = [
+export function usesCompactRrStrip(
+  bars: StructureChartPayload["bars"],
+  levels: StructureChartPayload["levels"],
+  mode: ChartZoomMode,
+): boolean {
+  return mode === "full" && !canExpandFullTradeAxis(bars, levels);
+}
+
+function structureZones(
+  obTime: Ut,
+  lastTime: Ut,
+  levels: StructureChartPayload["levels"],
+): LwcZoneSpec[] {
+  return [
     {
       p1: { time: obTime, price: levels.fvgLow },
       p2: { time: lastTime, price: levels.fvgHigh },
@@ -92,8 +109,15 @@ export function buildZoneSpecs(
       extendRight: true,
     },
   ];
+}
 
-  const rrZones: LwcZoneSpec[] = [
+function fullRrZones(
+  bosTime: Ut,
+  lastTime: Ut,
+  entry: number,
+  levels: StructureChartPayload["levels"],
+): LwcZoneSpec[] {
+  return [
     {
       p1: { time: bosTime, price: entry },
       p2: { time: lastTime, price: levels.takeProfit },
@@ -107,26 +131,72 @@ export function buildZoneSpecs(
       extendRight: true,
     },
   ];
+}
+
+/** Short green/red strips near entry when real SL/TP are off-screen (TV-style hint). */
+function compactRrZones(
+  bosTime: Ut,
+  lastTime: Ut,
+  entry: number,
+  view: PriceViewport,
+): LwcZoneSpec[] {
+  const strip = view.span * 0.36;
+  return [
+    {
+      p1: { time: bosTime, price: entry },
+      p2: { time: lastTime, price: entry + strip },
+      fillColor: ZONE.profitCompact,
+      extendRight: true,
+    },
+    {
+      p1: { time: bosTime, price: entry - strip },
+      p2: { time: lastTime, price: entry },
+      fillColor: ZONE.lossCompact,
+      extendRight: true,
+    },
+  ];
+}
+
+export function buildZoneSpecs(
+  chart: StructureChartPayload,
+  mode: ChartZoomMode,
+): LwcZoneSpec[] {
+  const { bars, levels, bosBarIndex } = chart;
+  const bosBar = bars[bosBarIndex] ?? bars[0]!;
+  const lastBar = bars[bars.length - 1]!;
+  const obBar = bars[Math.max(0, bosBarIndex - 1)] ?? bosBar;
+  const entry = entryPrice(levels);
+  const bosTime = bosBar.t as Ut;
+  const lastTime = lastBar.t as Ut;
+  const obTime = obBar.t as Ut;
+  const setup = setupViewport(bars, levels);
+  const zones = structureZones(obTime, lastTime, levels);
 
   if (mode === "full") {
-    return [...rrZones, ...structureZones];
+    if (usesCompactRrStrip(bars, levels, mode)) {
+      return [...compactRrZones(bosTime, lastTime, entry, setup), ...zones];
+    }
+    return [...fullRrZones(bosTime, lastTime, entry, levels), ...zones];
   }
 
-  const view = setupViewport(bars, levels);
   const rrSpan = levels.takeProfit - levels.stopLoss;
   const showRiskReward =
-    rrSpan <= view.span * 3.2 &&
-    levelInViewport(levels.stopLoss, view) &&
-    levelInViewport(levels.takeProfit, view);
+    rrSpan <= setup.span * 3.2 &&
+    levelInViewport(levels.stopLoss, setup) &&
+    levelInViewport(levels.takeProfit, setup);
 
-  return showRiskReward ? [...rrZones, ...structureZones] : structureZones;
+  return showRiskReward
+    ? [...fullRrZones(bosTime, lastTime, entry, levels), ...zones]
+    : zones;
 }
 
 export function autoscaleForMode(
   mode: ChartZoomMode,
+  bars: StructureChartPayload["bars"],
   levels: StructureChartPayload["levels"],
 ): { min: number; max: number } | null {
   if (mode !== "full") return null;
+  if (!canExpandFullTradeAxis(bars, levels)) return null;
   const view = fullTradeViewport(levels);
   return { min: view.min, max: view.max };
 }

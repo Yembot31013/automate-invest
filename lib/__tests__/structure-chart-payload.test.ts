@@ -37,7 +37,7 @@ describe("structure chart payload", () => {
 
     const chart = buildStructureChartPayload("NZD/USD", bars, setup);
     assert.equal(chart.symbol, "NZD/USD");
-    assert.equal(chart.bars.length <= 20, true);
+    assert.equal(chart.bars.length <= 72, true);
     assert.equal(chart.levels.obLow, 0.5894);
     assert.ok(chart.bosBarIndex >= 0);
     assert.ok(isStructureChartPayload(chart));

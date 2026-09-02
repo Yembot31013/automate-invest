@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 
 import type { StructureChartPayload } from "../structure/chart-payload.ts";
 import {
+  autoscaleForMode,
   buildZoneSpecs,
+  canExpandFullTradeAxis,
   fullTradeViewport,
   setupViewport,
   slTpOffChart,
+  usesCompactRrStrip,
 } from "../structure/chart-viewport.ts";
 
 const sampleChart: StructureChartPayload = {
@@ -54,5 +57,19 @@ describe("chart-viewport", () => {
   it("setup mode skips RR zones when SL/TP are far", () => {
     const zones = buildZoneSpecs(sampleChart, "setup");
     assert.equal(zones.length, 2);
+  });
+
+  it("does not stretch Y-axis to SL/TP when trade span is huge vs setup", () => {
+    assert.equal(canExpandFullTradeAxis(sampleChart.bars, sampleChart.levels), false);
+    assert.equal(autoscaleForMode("full", sampleChart.bars, sampleChart.levels), null);
+  });
+
+  it("uses compact RR strips in full mode when SL/TP are far", () => {
+    assert.equal(usesCompactRrStrip(sampleChart.bars, sampleChart.levels, "full"), true);
+    const zones = buildZoneSpecs(sampleChart, "full");
+    const entry = (sampleChart.levels.obLow + sampleChart.levels.obHigh) / 2;
+    const profitTop = zones[0]!.p2.price;
+    assert.ok(profitTop < sampleChart.levels.takeProfit);
+    assert.ok(profitTop > entry);
   });
 });

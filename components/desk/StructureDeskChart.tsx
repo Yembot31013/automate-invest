@@ -7,15 +7,18 @@ import type { StructureChartPayload } from "@/lib/structure/chart-payload";
 import {
   autoscaleForMode,
   buildZoneSpecs,
-  fullTradeViewport,
+  canExpandFullTradeAxis,
+  entryPrice,
   levelInViewport,
   setupViewport,
   slTpOffChart,
+  usesCompactRrStrip,
   type ChartZoomMode,
 } from "@/lib/structure/chart-viewport";
 import {
   TV_CANDLE_DOWN,
   TV_CANDLE_UP,
+  TV_FOREX_PRICE_FORMAT,
   TV_LINE_COLORS,
   tvChartOptions,
 } from "@/lib/structure/tv-chart-theme";
@@ -37,27 +40,30 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
     () => setupViewport(chart.bars, chart.levels),
     [chart.bars, chart.levels],
   );
-  const activeView = useMemo(
-    () => (zoomMode === "full" ? fullTradeViewport(chart.levels) : setupView),
-    [zoomMode, chart.levels, setupView],
+  const axisExpands = useMemo(
+    () => canExpandFullTradeAxis(chart.bars, chart.levels),
+    [chart.bars, chart.levels],
+  );
+  const compactRr = useMemo(
+    () => usesCompactRrStrip(chart.bars, chart.levels, zoomMode),
+    [chart.bars, chart.levels, zoomMode],
   );
   const zoneSpecs = useMemo(
     () => buildZoneSpecs(chart, zoomMode),
     [chart, zoomMode],
   );
   const autoscale = useMemo(
-    () => autoscaleForMode(zoomMode, chart.levels),
-    [zoomMode, chart.levels],
+    () => autoscaleForMode(zoomMode, chart.bars, chart.levels),
+    [zoomMode, chart.bars, chart.levels],
   );
 
   const offChartAtSetupZoom = slTpOffChart(chart.levels, setupView);
   const showOffChartNote = zoomMode === "setup" && offChartAtSetupZoom;
-  const slOffScreen =
-    zoomMode === "setup" && !levelInViewport(chart.levels.stopLoss, setupView);
-  const tpOffScreen =
-    zoomMode === "setup" && !levelInViewport(chart.levels.takeProfit, setupView);
-  const bosVisible = levelInViewport(chart.levels.bosPrice, activeView);
-  const entry = (chart.levels.obLow + chart.levels.obHigh) / 2;
+  const showCompactRrNote = compactRr;
+  const slOffScreen = !levelInViewport(chart.levels.stopLoss, setupView);
+  const tpOffScreen = !levelInViewport(chart.levels.takeProfit, setupView);
+  const bosVisible = levelInViewport(chart.levels.bosPrice, setupView);
+  const entry = entryPrice(chart.levels);
 
   useEffect(() => {
     setTheme(readTheme());
@@ -98,9 +104,9 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
         handleScale: { mouseWheel: true, pinch: true },
         timeScale: {
           ...tvChartOptions(theme).timeScale,
-          barSpacing: zoomMode === "full" ? 7 : 9,
-          minBarSpacing: 3,
-          rightOffset: 8,
+          barSpacing: 6,
+          minBarSpacing: 2,
+          rightOffset: 12,
         },
       });
 
@@ -112,6 +118,7 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
         wickDownColor: TV_CANDLE_DOWN,
         priceLineVisible: true,
         lastValueVisible: true,
+        priceFormat: TV_FOREX_PRICE_FORMAT,
       });
 
       series.setData(
@@ -147,19 +154,15 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
       };
 
       if (zoomMode === "full") {
-        addLine(levels.takeProfit, TV_LINE_COLORS.tp, "TP");
-        addLine(levels.stopLoss, TV_LINE_COLORS.sl, "SL");
         addLine(entry, TV_LINE_COLORS.entry, "Entry");
-      } else {
-        if (bosVisible) {
-          addLine(levels.bosPrice, TV_LINE_COLORS.bos, "BOS");
-        }
-        if (levelInViewport(levels.stopLoss, activeView)) {
+        addLine(levels.obHigh, TV_LINE_COLORS.ob, "OB top", true);
+        addLine(levels.obLow, TV_LINE_COLORS.ob, "OB low", true);
+        if (!compactRr) {
           addLine(levels.stopLoss, TV_LINE_COLORS.sl, "SL");
-        }
-        if (levelInViewport(levels.takeProfit, activeView)) {
           addLine(levels.takeProfit, TV_LINE_COLORS.tp, "TP");
         }
+      } else if (bosVisible) {
+        addLine(levels.bosPrice, TV_LINE_COLORS.bos, "BOS");
       }
 
       chartApi.timeScale().fitContent();
@@ -174,7 +177,16 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
         chartApi = null;
       }
     };
-  }, [chart, zoneSpecs, theme, zoomMode, autoscale, activeView, bosVisible, entry]);
+  }, [
+    chart,
+    zoneSpecs,
+    theme,
+    zoomMode,
+    autoscale,
+    bosVisible,
+    entry,
+    compactRr,
+  ]);
 
   return (
     <div className="structure-tv-chart-wrap">
@@ -220,7 +232,7 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
         </div>
         {showOffChartNote ? (
           <p className="structure-tv-offchart-note">
-            SL / TP off chart at this zoom — try{" "}
+            SL / TP are far from price — use{" "}
             <button
               type="button"
               className="structure-tv-offchart-link"
@@ -228,7 +240,18 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
             >
               Full trade
             </button>{" "}
-            or see Trade plan →
+            for RR strips, or see Trade plan →
+          </p>
+        ) : null}
+        {showCompactRrNote ? (
+          <p className="structure-tv-offchart-note">
+            Green/red strips = direction to TP / SL · exact levels on chart edges
+            &amp; Trade plan →
+          </p>
+        ) : null}
+        {zoomMode === "full" && axisExpands ? (
+          <p className="structure-tv-offchart-note structure-tv-offchart-note-muted">
+            Full SL → TP zoom (tight trade range)
           </p>
         ) : null}
       </div>

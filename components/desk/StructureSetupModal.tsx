@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -54,9 +55,8 @@ function TradePlanPanel({ chart }: { chart: StructureChartPayload }) {
 
       {slTpFar ? (
         <p className="structure-trade-offchart-hint">
-          Stop &amp; target are far from price — use{" "}
-          <strong>Full trade</strong> zoom on the chart to see the green/red
-          long box.
+          Stop &amp; target are far from price — <strong>Full trade</strong> shows
+          green/red RR strips near entry; exact SL/TP on chart edges and below.
         </p>
       ) : null}
 
@@ -134,11 +134,22 @@ export function StructureSetupModal({
 
   useEffect(() => setMounted(true), []);
 
+  const openedRef = useRef(false);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      openedRef.current = false;
+      return;
+    }
+    if (openedRef.current) return;
+    openedRef.current = true;
     setTheme(readTheme());
     setView("desk");
     setActiveTf(chart.timeframe);
+  }, [open, chart.timeframe]);
+
+  useEffect(() => {
+    if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
@@ -149,7 +160,7 @@ export function StructureSetupModal({
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, chart.timeframe]);
+  }, [open, onClose]);
 
   if (!mounted || !open) return null;
 

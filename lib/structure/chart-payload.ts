@@ -32,7 +32,18 @@ export type StructureChartPayload = {
   };
 };
 
-const FOCUS_WINDOW = 20;
+const CHART_BAR_WINDOWS: Record<string, number> = {
+  "1H": 96,
+  "2H": 72,
+  "4H": 60,
+  "1D": 45,
+};
+
+const DEFAULT_CHART_WINDOW = 72;
+
+function chartWindowForTimeframe(timeframe: string): number {
+  return CHART_BAR_WINDOWS[timeframe.toUpperCase()] ?? DEFAULT_CHART_WINDOW;
+}
 
 function slimBar(b: OhlcBar): StructureChartCandle {
   return {
@@ -44,15 +55,16 @@ function slimBar(b: OhlcBar): StructureChartCandle {
   };
 }
 
-/** Keep candles tight around the setup so the chart is not a flat squiggle. */
+/** Keep enough history for TV-like context while centred on the setup. */
 export function focusBarsAroundSetup(
   bars: OhlcBar[],
   setup: BullishStructureSetup,
-  window = FOCUS_WINDOW,
+  window = chartWindowForTimeframe(setup.timeframe),
 ): OhlcBar[] {
   let bosIndex = bars.findIndex((b) => b.timestamp === setup.setupBarTime);
-  if (bosIndex < 0) bosIndex = Math.max(0, bars.length - 8);
-  const start = Math.max(0, bosIndex - Math.floor(window * 0.45));
+  if (bosIndex < 0) bosIndex = Math.max(0, bars.length - 12);
+  const before = Math.floor(window * 0.55);
+  const start = Math.max(0, bosIndex - before);
   const end = Math.min(bars.length, start + window);
   return bars.slice(start, end);
 }
