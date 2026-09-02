@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 
 import { readTheme } from "@/components/theme/theme";
 import type { StructureChartPayload } from "@/lib/structure/chart-payload";
+import { structureChartDataWindow } from "@/lib/structure/chart-data-label";
 import { setupViewport, slTpOffChart } from "@/lib/structure/chart-viewport";
 import { structureTimeframeToTvInterval } from "@/lib/structure/tv-interval";
 import { StructureDeskChart } from "@/components/desk/StructureDeskChart";
@@ -43,20 +44,44 @@ function phaseBadgeClass(phase: StructureChartPayload["phase"]): string {
   return "structure-phase-off";
 }
 
-function TradePlanPanel({ chart }: { chart: StructureChartPayload }) {
+function TradePlanPanel({
+  chart,
+  view,
+}: {
+  chart: StructureChartPayload;
+  view: "desk" | "tradingview";
+}) {
   const { levels, phase } = chart;
   const inZone = phase === "in_zone";
   const setupView = setupViewport(chart.bars, levels);
   const slTpFar = slTpOffChart(levels, setupView);
+  const dataWindow = structureChartDataWindow({
+    bars: chart.bars,
+    timeframe: chart.timeframe,
+  });
 
   return (
     <aside className="structure-levels-panel">
       <p className="structure-levels-panel-title">Trade plan</p>
 
-      {slTpFar ? (
+      {view === "tradingview" ? (
+        <p className="structure-scan-live-note">
+          <strong>Live chart</strong> on the left. Levels below are from our scan
+          snapshot
+          {dataWindow ? ` (${dataWindow.priceAsOfLabel})` : ""} — prices may not
+          match.
+        </p>
+      ) : dataWindow ? (
+        <p className="structure-scan-data-note">
+          Scan snapshot · {dataWindow.barCount} × {chart.timeframe} ·{" "}
+          {dataWindow.rangeLabel}. Not live ticks.
+        </p>
+      ) : null}
+
+      {view === "desk" && slTpFar ? (
         <p className="structure-trade-offchart-hint">
-          Stop &amp; target are far from price — <strong>Full trade</strong> shows
-          green/red RR strips near entry; exact SL/TP on chart edges and below.
+          Stop &amp; target are far from price. Use <strong>Full trade</strong> for
+          RR strips; exact SL/TP stay in this panel.
         </p>
       ) : null}
 
@@ -80,7 +105,9 @@ function TradePlanPanel({ chart }: { chart: StructureChartPayload }) {
         <div className="structure-trade-hero-card structure-trade-hero-tp">
           <span className="structure-trade-hero-label">Take profit</span>
           <span className="structure-trade-hero-value">{fx(levels.takeProfit)}</span>
-          <span className="structure-trade-hero-hint">Target exit · R:R 1 : {levels.riskReward}</span>
+          <span className="structure-trade-hero-hint">
+            Target exit · R:R 1 : {levels.riskReward}
+          </span>
         </div>
       </div>
 
@@ -96,9 +123,18 @@ function TradePlanPanel({ chart }: { chart: StructureChartPayload }) {
             {fx(levels.fvgLow)} – {fx(levels.fvgHigh)}
           </dd>
         </div>
-        <div className="structure-detail-row">
-          <dt>Current price</dt>
-          <dd>{fx(levels.currentPrice)}</dd>
+        <div className="structure-detail-row structure-detail-row--stack">
+          <dt>Last close (scan)</dt>
+          <dd>
+            <span className="structure-detail-price">
+              {fx(levels.currentPrice)}
+            </span>
+            {dataWindow ? (
+              <span className="structure-detail-asof">
+                as of {dataWindow.priceAsOfLabel}
+              </span>
+            ) : null}
+          </dd>
         </div>
       </dl>
     </aside>
@@ -127,6 +163,11 @@ export function StructureSetupModal({
   const [activeTf, setActiveTf] = useState(chart.timeframe);
   const activeChart =
     tabs.find((t) => t.timeframe === activeTf)?.chart ?? chart;
+
+  const dataWindow = structureChartDataWindow({
+    bars: activeChart.bars,
+    timeframe: activeChart.timeframe,
+  });
 
   const tvSymbol = toTradingViewSymbol(activeChart.symbol, "FOREX");
   const tvPage = tradingViewSymbolPageUrl(tvSymbol);
@@ -179,14 +220,21 @@ export function StructureSetupModal({
         aria-labelledby={titleId}
       >
         <div className="structure-modal-head">
-          <div className="min-w-0">
+          <div className="structure-modal-head-copy min-w-0">
             <h3 id={titleId} className="structure-modal-title">
               {activeChart.symbol}
               <span className="structure-modal-tf">{activeChart.timeframe}</span>
             </h3>
             <p className="structure-modal-sub">{phaseLabel(activeChart.phase)}</p>
+            {dataWindow ? (
+              <p className="structure-modal-data-range">
+                {view === "desk"
+                  ? `Scan window · ${dataWindow.rangeLabel}`
+                  : `Scan levels · as of ${dataWindow.priceAsOfLabel}`}
+              </p>
+            ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="structure-modal-head-actions">
             <span
               className={`structure-phase-badge ${phaseBadgeClass(activeChart.phase)}`}
             >
@@ -198,7 +246,7 @@ export function StructureSetupModal({
             </span>
             <button
               type="button"
-              className="btn-primary !px-3.5 !py-2 text-sm"
+              className="btn-primary structure-modal-close"
               onClick={onClose}
             >
               Close
@@ -265,7 +313,7 @@ export function StructureSetupModal({
               <StructureDeskChart chart={activeChart} />
             )}
           </div>
-          <TradePlanPanel chart={activeChart} />
+          <TradePlanPanel chart={activeChart} view={view} />
         </div>
       </div>
     </div>,

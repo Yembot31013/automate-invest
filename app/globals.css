@@ -881,10 +881,17 @@ body {
     border-left: none;
     border-right: none;
     padding:
-      max(0.75rem, env(safe-area-inset-top))
-      max(0.75rem, env(safe-area-inset-right))
-      max(0.65rem, env(safe-area-inset-bottom))
-      max(0.75rem, env(safe-area-inset-left));
+      max(0.65rem, env(safe-area-inset-top))
+      max(0.7rem, env(safe-area-inset-right))
+      0
+      max(0.7rem, env(safe-area-inset-left));
+  }
+
+  .modal-card-structure {
+    /* Keep head/toolbar fixed; body scrolls the rest */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 }
 
@@ -1903,6 +1910,18 @@ body {
   flex-shrink: 0;
 }
 
+.structure-modal-head-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.structure-modal-close {
+  padding: 0.45rem 0.9rem !important;
+  font-size: 0.82rem !important;
+}
+
 .structure-modal-title {
   margin: 0.15rem 0 0;
   font-size: 1.35rem;
@@ -1921,6 +1940,71 @@ body {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.structure-modal-data-range {
+  margin: 0.35rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--muted) 92%, var(--ink));
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.structure-scan-data-note,
+.structure-scan-live-note {
+  margin: 0.55rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  background: color-mix(in srgb, var(--white) 55%, var(--mix));
+  overflow-wrap: anywhere;
+}
+
+.structure-scan-live-note {
+  border-color: color-mix(in srgb, var(--yellow) 35%, transparent);
+  background: color-mix(in srgb, var(--yellow) 12%, var(--mix));
+}
+
+.structure-scan-live-note strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.structure-detail-row--stack {
+  align-items: flex-start;
+}
+
+.structure-detail-row--stack dd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+}
+
+.structure-detail-price {
+  display: block;
+}
+
+.structure-detail-asof {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.structure-tv-data-range {
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: var(--muted);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  flex-shrink: 0;
 }
 
 .structure-levels-panel-sub {
@@ -2087,18 +2171,22 @@ body {
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 0.75rem;
   margin-top: 0.65rem;
 }
 
 @media (min-width: 900px) {
   .structure-modal-body {
-    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
   }
 }
 
 .structure-modal-chart-col {
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -2112,7 +2200,8 @@ body {
 
 .structure-tv-frame {
   flex: 1 1 auto;
-  min-height: 280px;
+  min-height: 0;
+  height: 100%;
   margin-top: 0;
 }
 
@@ -2130,6 +2219,169 @@ body {
   padding: 14px 14px 12px;
   overflow-y: auto;
   max-height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 899px) {
+  .modal-card-structure {
+    overflow: hidden;
+  }
+
+  .structure-modal-head {
+    gap: 0.5rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .structure-modal-head-copy {
+    min-width: 0;
+    flex: 1 1 12rem;
+  }
+
+  .structure-modal-head-actions {
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  .structure-modal-title {
+    font-size: 1.05rem;
+    line-height: 1.2;
+  }
+
+  .structure-modal-sub {
+    font-size: 0.78rem;
+  }
+
+  .structure-modal-data-range {
+    font-size: 0.62rem;
+    overflow-wrap: anywhere;
+  }
+
+  .structure-modal-close {
+    padding: 0.4rem 0.7rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  .structure-phase-badge {
+    padding: 3px 8px;
+    font-size: 9px;
+  }
+
+  .structure-modal-toolbar {
+    gap: 0.45rem;
+    margin-top: 0.5rem;
+  }
+
+  .structure-tf-tabs-inline,
+  .structure-view-tabs {
+    width: 100%;
+  }
+
+  .structure-view-tab,
+  .structure-tf-tab {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .structure-modal-body {
+    grid-template-rows: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    gap: 0.65rem;
+    margin-top: 0.55rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .structure-modal-chart-col {
+    height: auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .structure-tv-frame,
+  .structure-tv-chart-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-height: min(42dvh, 340px);
+    height: min(42dvh, 340px);
+  }
+
+  .structure-tv-chart-stage,
+  .structure-tv-chart-host {
+    min-height: 0;
+  }
+
+  /* Drop duplicate ticker/range — modal head already shows them */
+  .structure-tv-head,
+  .structure-tv-data-range {
+    display: none;
+  }
+
+  .structure-tv-zoom-bar {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .structure-tv-offchart-note {
+    width: 100%;
+    font-size: 10px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .structure-levels-panel {
+    max-height: none;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    padding: 12px;
+  }
+
+  .structure-scan-data-note,
+  .structure-scan-live-note,
+  .structure-trade-offchart-hint {
+    margin-bottom: 0.65rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 100%;
+  }
+
+  .structure-trade-hero {
+    min-width: 0;
+  }
+
+  .structure-trade-hero-card {
+    min-width: 0;
+    padding: 10px 12px;
+  }
+
+  .structure-trade-hero-value {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .structure-trade-hero-hint {
+    overflow-wrap: anywhere;
+  }
+
+  .structure-detail-row {
+    gap: 8px;
+  }
+
+  .structure-detail-row dt {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .structure-detail-row dd {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .structure-levels-panel-title {
@@ -2194,7 +2446,8 @@ body {
 /* TradingView-style lightweight-charts host */
 .structure-tv-chart-wrap {
   flex: 1 1 auto;
-  min-height: 360px;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
@@ -2358,6 +2611,7 @@ body {
   color: color-mix(in srgb, var(--muted) 90%, var(--ink));
   background: color-mix(in srgb, var(--blue) 12%, var(--mix));
   border: 1px solid color-mix(in srgb, var(--blue) 28%, transparent);
+  overflow-wrap: anywhere;
 }
 
 .structure-tv-chart-stage {

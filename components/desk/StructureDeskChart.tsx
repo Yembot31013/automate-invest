@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StructureSetupOverlay } from "@/lib/structure/lwc-setup-overlay";
 import type { StructureChartPayload } from "@/lib/structure/chart-payload";
+import { structureChartDataWindow } from "@/lib/structure/chart-data-label";
 import {
   autoscaleForMode,
   buildZoneSpecs,
@@ -85,6 +86,10 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
   const headerOhlc = lastBar
     ? `O ${fx(lastBar.o)}  H ${fx(lastBar.h)}  L ${fx(lastBar.l)}  C ${fx(lastBar.c)}`
     : "";
+  const dataWindow = structureChartDataWindow({
+    bars: chart.bars,
+    timeframe: chart.timeframe,
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -208,6 +213,13 @@ export function StructureDeskChart({ chart }: { chart: StructureChartPayload }) 
           ) : null}
         </div>
       </div>
+
+      {dataWindow ? (
+        <p className="structure-tv-data-range">
+          {dataWindow.rangeLabel} · last close {dataWindow.priceAsOfLabel} · scan
+          data
+        </p>
+      ) : null}
 
       <div className="structure-tv-zoom-bar">
         <div className="structure-tv-zoom-tabs" role="tablist" aria-label="Chart zoom">
