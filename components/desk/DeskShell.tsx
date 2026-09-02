@@ -13,6 +13,7 @@ import { OnboardingModal } from "@/components/desk/OnboardingModal";
 import { AutoTradeEnableModal } from "@/components/desk/AutoTradeEnableModal";
 import { TriggerGuardrailsModal } from "@/components/desk/TriggerGuardrailsModal";
 import { DeskAddModal } from "@/components/desk/DeskAddModal";
+import { DeskSectionHeading } from "@/components/desk/DeskSectionHeading";
 import { DeskTriggerDetailModal } from "@/components/desk/DeskTriggerDetailModal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import {
@@ -693,6 +694,8 @@ export function DeskShell() {
     selectedTriggerId != null
       ? (triggers.find((t) => t.id === selectedTriggerId) ?? null)
       : null;
+  const structureHits = structureSetups.filter((row) => row.phase !== "none");
+  const hasFxOnWatchlist = structureSetups.length > 0;
   const openSymbols = (portfolio?.positions ?? []).map((p) => p.symbol);
   const anyBusy =
     busyAdd ||
@@ -749,7 +752,11 @@ export function DeskShell() {
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        <p className="font-mono-label px-1">Watchlist</p>
+        <DeskSectionHeading
+          sectionId="watchlist"
+          title="Watchlist"
+          subtitle={`${watchlistCount}/${MAX_USER_WATCHLIST} · tap a row for a Sidekick update`}
+        />
         {loading && snapshots.length === 0 ? (
           <div className="space-y-2 px-1" aria-busy="true" aria-label="Loading watchlist">
             <Skeleton lines={3} />
@@ -829,59 +836,76 @@ export function DeskShell() {
           ))
         )}
 
-        {structureSetups.some((row) => row.phase !== "none") ? (
-          <>
-            <p className="font-mono-label px-1 pt-3">Structure · FX</p>
-            <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">
-              BOS + FVG + order block on your forex watchlist (2H scan)
-            </p>
-            {structureSetups
-              .filter((row) => row.phase !== "none")
-              .map((row) => (
-                <Tip
-                  key={`structure-${row.symbol}`}
-                  label={`Open structure scan for ${row.symbol} in chat`}
-                  className="block"
-                  as="div"
-                >
-                  <button
-                    type="button"
-                    className="tilt-hover soft-card structure-sidebar-card w-full px-3 py-2.5 text-left"
-                    onClick={() => {
-                      setExternalPrompt(
-                        `Run structure scan on ${row.symbol} — check all timeframes (1H, 2H, 4H, 1D) and show me the chart.`,
-                      );
-                      setMobilePanel("chat");
-                      setComposerFocusKey((n) => n + 1);
-                    }}
+        <DeskSectionHeading
+          sectionId="structure"
+          title="Structure · FX"
+          divider
+          subtitle="BOS + FVG + order block on your forex watchlist (2H scan)"
+        />
+        {loading && structureSetups.length === 0 ? (
+          <div className="space-y-2 px-1" aria-busy="true">
+            <Skeleton lines={1} />
+          </div>
+        ) : !hasFxOnWatchlist ? (
+          <EmptyHint
+            title="Forex only"
+            body="Pin a pair like EUR/USD or NZD/USD on your watchlist. We scan it for setups here."
+          />
+        ) : structureHits.length === 0 ? (
+          <EmptyHint
+            title="No setup right now"
+            body="Background scan is running on your FX pairs. A row appears when a valid buy zone is found."
+          />
+        ) : (
+          structureHits.map((row) => (
+            <Tip
+              key={`structure-${row.symbol}`}
+              label={`Open structure scan for ${row.symbol} in chat`}
+              className="block"
+              as="div"
+            >
+              <button
+                type="button"
+                className="tilt-hover soft-card structure-sidebar-card w-full px-3 py-2.5 text-left"
+                onClick={() => {
+                  setExternalPrompt(
+                    `Run structure scan on ${row.symbol} — check all timeframes (1H, 2H, 4H, 1D) and show me the chart.`,
+                  );
+                  setMobilePanel("chat");
+                  setComposerFocusKey((n) => n + 1);
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold">{row.symbol}</span>
+                  <span
+                    className={`structure-sidebar-badge structure-sidebar-badge--${row.phase}`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-bold">{row.symbol}</span>
-                      <span
-                        className={`structure-sidebar-badge structure-sidebar-badge--${row.phase}`}
-                      >
-                        {row.phase === "in_zone"
-                          ? "IN ZONE"
-                          : row.phase === "waiting_retrace"
-                            ? "WAITING"
-                            : "WATCH"}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[0.68rem] text-[var(--muted)]">
-                      OB {row.obLow?.toFixed(5)} – {row.obHigh?.toFixed(5)} · RR
-                      1:{row.riskReward ?? "—"}
-                    </p>
-                  </button>
-                </Tip>
-              ))}
-          </>
-        ) : null}
+                    {row.phase === "in_zone"
+                      ? "IN ZONE"
+                      : row.phase === "waiting_retrace"
+                        ? "WAITING"
+                        : "WATCH"}
+                  </span>
+                </div>
+                <p className="mt-1 text-[0.68rem] text-[var(--muted)]">
+                  OB {row.obLow?.toFixed(5)} – {row.obHigh?.toFixed(5)} · RR
+                  1:{row.riskReward ?? "—"}
+                </p>
+              </button>
+            </Tip>
+          ))
+        )}
 
-        <p className="font-mono-label px-1 pt-3">Triggers</p>
-        <p className="px-1 pb-1 text-[0.68rem] leading-snug text-[var(--muted)]">
-          {loading ? "…" : `${triggers.length}/${triggerLimit}`} · cron checks
-          these on scan
-        </p>
+        <DeskSectionHeading
+          sectionId="triggers"
+          title="Triggers"
+          divider
+          subtitle={
+            loading
+              ? "…"
+              : `${triggers.length}/${triggerLimit} · cron checks these on scan`
+          }
+        />
         {loading ? (
           <div
             className="space-y-2 px-1"

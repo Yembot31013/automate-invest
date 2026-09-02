@@ -253,8 +253,8 @@ const DEED_COPY: Record<string, DeedCopy> = {
     error: "Couldn't load trade history",
   },
   getStructureSetup: {
-    running: "Scanning 2H structure…",
-    done: "Structure scan ready",
+    running: "Running structure scan…",
+    done: "Setup map ready",
     error: "Couldn't scan structure",
   },
   whatIf: {
@@ -563,7 +563,14 @@ function deedHint(params: {
         (typeof outRec?.symbol === "string" && outRec.symbol) ||
         subject ||
         "FX pair";
-      if (phase === "running") return `Scanning 2H structure on ${sym}`;
+      const tfLabel = inRec?.allTimeframes
+        ? "all timeframes"
+        : typeof inRec?.timeframe === "string"
+          ? inRec.timeframe
+          : "2H";
+      if (phase === "running") {
+        return `Running structure scan on ${sym} · ${tfLabel}`;
+      }
       if (phase === "error") return err ?? "Couldn't scan structure";
       if (outRec?.ok === false) {
         return typeof outRec.error === "string"
@@ -572,11 +579,13 @@ function deedHint(params: {
       }
       const setup = asRec(outRec?.setup);
       if (!setup) {
-        return `No bullish BOS+FVG+OB setup on ${sym} right now`;
+        return `No bullish BOS+FVG+OB setup on ${sym} · ${tfLabel}`;
       }
       const phaseLabel =
         setup.phase === "in_zone" ? "in order block zone" : "waiting retrace";
-      return `Structure on ${sym} · ${phaseLabel}`;
+      const tf =
+        typeof setup.timeframe === "string" ? setup.timeframe : tfLabel;
+      return `Setup map · ${sym} ${tf} · ${phaseLabel}`;
     }
     case "whatIf": {
       const sym = subject || "that ticker";

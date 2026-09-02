@@ -1109,7 +1109,7 @@ export function createDeskTools(userId: string) {
 
     getStructureSetup: tool({
       description:
-        "Scan a forex pair for bullish BOS + FVG + order-block structure on intraday candles (1H, 2H, 4H, or 1D). Returns an annotated chart + level table in the UI. Use allTimeframes when they want every timeframe checked. NOT for daily getSnapshot guessing.",
+        "Deterministic FX structure scan (BOS + FVG + order block). Returns setup map chart + levels in chat. Call proactively when the user is trade-curious on a forex pair (entry, levels, setup, SL/TP) — they do not have to say 'structure scan'. Default timeframe 2H; use allTimeframes for a full 1H/2H/4H/1D pass. At most once per user message. NOT for commodities/crypto or casual price-only checks.",
       inputSchema: z.object({
         symbol: z
           .string()
