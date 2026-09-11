@@ -85,7 +85,7 @@ export const DESK_SECTION_GUIDES: Record<DeskSectionId, DeskSectionGuide> = {
       body: "NZD/USD shows IN ZONE · OB 0.58948–0.59004 · RR 1:2. On the chat setup card, tap Arm buy-zone alert → chat fills with a natural “ping me at this level” ask. You hit send when ready.",
     },
     compare:
-      "Unlike Triggers (your custom rules), Structure is a fixed FX pattern detector. Arm buy-zone alert on the chat card drafts a trigger from the setup levels. Unlike the watchlist (any asset), Structure only runs on forex pairs you’ve pinned.",
+      "Unlike Triggers (your custom rules), Structure is a fixed FX pattern detector. Arm buy-zone alert on the chat card drafts a trigger from the setup levels. Ask Sidekick to backtest the structure strategy for historical win rate / R stats. Unlike the watchlist (any asset), Structure only runs on forex pairs you’ve pinned.",
   },
   triggers: {
     id: "triggers",

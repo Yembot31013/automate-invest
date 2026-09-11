@@ -257,6 +257,11 @@ const DEED_COPY: Record<string, DeedCopy> = {
     done: "Setup map ready",
     error: "Couldn't scan structure",
   },
+  backtestStructure: {
+    running: "Backtesting structure…",
+    done: "Structure backtest ready",
+    error: "Couldn't backtest structure",
+  },
   whatIf: {
     running: "Running a what-if…",
     done: "What-if ready",
@@ -593,6 +598,28 @@ function deedHint(params: {
       const tf =
         typeof setup.timeframe === "string" ? setup.timeframe : tfLabel;
       return `Setup map · ${sym} ${tf} · ${phaseLabel}`;
+    }
+    case "backtestStructure": {
+      const sym =
+        (typeof outRec?.symbol === "string" && outRec.symbol) ||
+        subject ||
+        "FX pair";
+      const tf =
+        (typeof outRec?.timeframe === "string" && outRec.timeframe) ||
+        (typeof inRec?.timeframe === "string" && inRec.timeframe) ||
+        "2H";
+      if (phase === "running") {
+        return `Backtesting structure on ${sym} · ${tf}`;
+      }
+      if (phase === "error") return err ?? "Couldn't backtest structure";
+      if (outRec?.ok === false) {
+        return typeof outRec.error === "string"
+          ? outRec.error
+          : `Structure backtest failed for ${sym}`;
+      }
+      const formatted =
+        typeof outRec?.formatted === "string" ? outRec.formatted : null;
+      return formatted ?? `Structure backtest ready · ${sym} ${tf}`;
     }
     case "whatIf": {
       const sym = subject || "that ticker";

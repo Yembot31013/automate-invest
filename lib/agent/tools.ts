@@ -8,6 +8,10 @@ import {
   scanForexStructureAllTimeframes,
   scanForexStructureDetailed,
 } from "@/lib/structure-scanner";
+import {
+  formatStructureBacktestSummary,
+  runStructureBacktest,
+} from "@/lib/structure-backtest";
 import { normalizeStructureTimeframe } from "@/lib/structure/timeframes";
 import {
   convertForeignToNgn,
@@ -964,7 +968,7 @@ export function createDeskTools(userId: string) {
 
     paperBuy: tool({
       description:
-        "Open a paper long using paper cash ($100k starting balance). Fails if cash is insufficient.",
+        "Open a paper long using paper cash ($100k starting balance). Works for US equities, NGX, crypto, FX, and commodities (XAU/USD gold, XAG/USD silver, WTI/USD oil). For dollar budgets, getSnapshot first then quantity = notional / price (fractional OK). Gold/oil marks are futures proxies — say that once. Fails if cash is insufficient.",
       inputSchema: z.object({
         symbol: z.string(),
         quantity: z.number().positive(),
@@ -1199,6 +1203,43 @@ export function createDeskTools(userId: string) {
             setup: row.setup,
             chart: row.chart,
             formatted: formatStructureSetup(row.setup),
+          };
+        });
+      },
+    }),
+
+    backtestStructure: tool({
+      description:
+        "Backtest the deterministic bullish BOS+FVG+order-block structure strategy on historical FX bars (Yahoo window). Returns win rate, avg R, total R, and recent simulated trades. Forex only. At most ONCE per user message. Not a live trade — simulation with conservative same-bar SL rules. Prefer when they ask if the structure scan / strategy works, historical performance, or win rate.",
+      inputSchema: z.object({
+        symbol: z
+          .string()
+          .describe("Forex pair e.g. NZD/USD, EUR/USD, EUR/AUD"),
+        timeframe: z
+          .enum(["1H", "2H", "4H", "1D"])
+          .optional()
+          .describe("Default 2H"),
+      }),
+      execute: async ({ symbol, timeframe }) => {
+        const tf = normalizeStructureTimeframe(timeframe);
+        const key = `backtestStructure:${symbol.trim().toUpperCase()}:${tf}`;
+        return dedupe(key, async () => {
+          const result = await runStructureBacktest({ symbol, timeframe: tf });
+          if (!result.ok) return result;
+          return {
+            ...result,
+            formatted: formatStructureBacktestSummary(result),
+            recentTrades: result.trades.slice(-12).map((t) => ({
+              outcome: t.outcome,
+              entry: t.entry,
+              exit: t.exit,
+              stopLoss: t.stopLoss,
+              takeProfit: t.takeProfit,
+              rMultiple: t.rMultiple,
+              riskReward: t.riskReward,
+              entryBarTime: t.entryBarTime,
+              exitBarTime: t.exitBarTime,
+            })),
           };
         });
       },

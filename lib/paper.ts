@@ -94,11 +94,6 @@ export async function paperBuy(params: {
         `Unsupported crypto ${resolved.symbol}. Supported: ${listSupportedCryptoPairs().join(", ")}`,
       );
     }
-    if (resolved.assetClass === "forex" || resolved.assetClass === "commodity") {
-      throw new Error(
-        `Paper trading is not enabled for ${resolved.symbol} yet — snapshots only for FX and commodities.`,
-      );
-    }
     const symbol = resolved.symbol;
     if (!symbol) {
       throw new Error("Symbol is required");
